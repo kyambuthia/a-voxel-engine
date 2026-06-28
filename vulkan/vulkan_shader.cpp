@@ -7,8 +7,9 @@
 std::vector<char> VulkanShader::readFile(const std::string& filepath) {
     std::ifstream file(filepath, std::ios::ate | std::ios::binary);
     if (!file.is_open()) {
-        std::cerr << "Failed to open shader file: " << filepath << "\n";
-        assert(false);
+        std::cerr << "[FATAL] Failed to open shader file: " << filepath
+                  << " at " << __FILE__ << ":" << __LINE__ << "\n";
+        std::abort();
     }
 
     size_t fileSize = static_cast<size_t>(file.tellg());
