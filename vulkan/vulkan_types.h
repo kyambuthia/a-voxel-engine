@@ -1,0 +1,63 @@
+#pragma once
+
+#include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/type_ptr.hpp>
+#include <vulkan/vulkan.h>
+#include <vector>
+#include <array>
+#include <cstdint>
+
+// -----------------------------------------------------------------------------
+// Vertex layout
+// -----------------------------------------------------------------------------
+struct Vertex {
+    glm::vec3 pos;
+    glm::vec3 normal;
+    glm::vec3 color;
+
+    static VkVertexInputBindingDescription bindingDescription() {
+        VkVertexInputBindingDescription d{};
+        d.binding   = 0;
+        d.stride    = sizeof(Vertex);
+        d.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+        return d;
+    }
+
+    static std::array<VkVertexInputAttributeDescription, 3> attributeDescriptions() {
+        std::array<VkVertexInputAttributeDescription, 3> attrs{};
+        // position
+        attrs[0].binding  = 0;
+        attrs[0].location = 0;
+        attrs[0].format   = VK_FORMAT_R32G32B32_SFLOAT;
+        attrs[0].offset   = offsetof(Vertex, pos);
+        // normal
+        attrs[1].binding  = 0;
+        attrs[1].location = 1;
+        attrs[1].format   = VK_FORMAT_R32G32B32_SFLOAT;
+        attrs[1].offset   = offsetof(Vertex, normal);
+        // color
+        attrs[2].binding  = 0;
+        attrs[2].location = 2;
+        attrs[2].format   = VK_FORMAT_R32G32B32_SFLOAT;
+        attrs[2].offset   = offsetof(Vertex, color);
+        return attrs;
+    }
+};
+
+// -----------------------------------------------------------------------------
+// Uniform buffer object (matches layout in shader)
+// -----------------------------------------------------------------------------
+struct UniformBufferObject {
+    glm::mat4 model;
+    glm::mat4 view;
+    glm::mat4 proj;
+};
+
+// -----------------------------------------------------------------------------
+// Mesh data (CPU side)
+// -----------------------------------------------------------------------------
+struct Mesh {
+    std::vector<Vertex>     vertices;
+    std::vector<uint32_t>   indices;
+};
