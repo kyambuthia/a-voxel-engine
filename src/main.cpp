@@ -5,7 +5,6 @@
 #include "vulkan_types.h"
 #include <iostream>
 #include <cstdlib>
-#include <chrono>
 #include <string>
 
 #include <SDL3/SDL.h>
@@ -207,16 +206,16 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    // --- Camera state ---
-    glm::vec3 camPos    = glm::vec3(2.5f, 2.0f, 2.5f);
+    // --- Camera orbit state (shared by touch & mouse drag) ---
     glm::vec3 camTarget = glm::vec3(0.0f, 0.0f, 0.0f);
     glm::vec3 camUp     = glm::vec3(0.0f, 1.0f, 0.0f);
-
-    float rotationAngle = 0.0f;
-    auto startTime = std::chrono::high_resolution_clock::now();
+    float     camRadius = 3.5f;
+    float     camYaw    = 0.0f;     // horizontal angle (radians)
+    float     camPitch  = 0.35f;    // vertical angle (radians), slightly above horizon
+    bool      isDragging = false;
 
     // --- Voxel push color ---
-    glm::vec3 voxelColor(0.8f, 0.3f, 0.1f); // warm orange-brown
+    glm::vec3 voxelColor(1.0f, 0.5f, 0.2f); // bright orange (visible on phone screens)
 
     // --- Main loop ---
     std::cout << "Entering main loop.\n";
@@ -228,6 +227,31 @@ int main(int argc, char* argv[]) {
         while (SDL_PollEvent(&e)) {
             if (e.type == SDL_EVENT_QUIT) {
                 quit = true;
+            } else if (e.type == SDL_EVENT_FINGER_DOWN) {
+                // Start tracking finger drag for camera orbit
+                isDragging = true;
+            } else if (e.type == SDL_EVENT_FINGER_MOTION && isDragging) {
+                // Finger drag → orbit camera
+                // e.tfinger.dx/dy are normalized [-1, 1] relative to screen size
+                camYaw   -= e.tfinger.dx * 4.0f;
+                camPitch += e.tfinger.dy * 3.0f;
+                camPitch  = glm::clamp(camPitch, -1.2f, 1.2f);
+            } else if (e.type == SDL_EVENT_FINGER_UP) {
+                isDragging = false;
+            } else if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
+                if (e.button.button == SDL_BUTTON_LEFT) {
+                    isDragging = true;
+                }
+            } else if (e.type == SDL_EVENT_MOUSE_MOTION && isDragging) {
+                // Mouse drag → orbit camera
+                // e.motion.xrel/yrel are pixel deltas
+                camYaw   -= e.motion.xrel * 0.005f;
+                camPitch += e.motion.yrel * 0.005f;
+                camPitch  = glm::clamp(camPitch, -1.2f, 1.2f);
+            } else if (e.type == SDL_EVENT_MOUSE_BUTTON_UP) {
+                if (e.button.button == SDL_BUTTON_LEFT) {
+                    isDragging = false;
+                }
             } else if (e.type == SDL_EVENT_DID_ENTER_BACKGROUND) {
                 // Android: activity paused, native window destroyed.
                 // Destroy all surface-dependent resources.
@@ -253,17 +277,11 @@ int main(int argc, char* argv[]) {
         }
 
         // --- Update UBO ---
-        auto currentTime = std::chrono::high_resolution_clock::now();
-        float time = std::chrono::duration<float, std::chrono::seconds::period>(
-            currentTime - startTime).count();
-
-        // Slow rotation
-        rotationAngle = time * 0.3f;
-
-        // Camera orbit
-        float radius = 3.5f;
-        camPos.x = radius * cos(rotationAngle);
-        camPos.z = radius * sin(rotationAngle);
+        // Camera orbit via yaw/pitch (set by finger or mouse drag)
+        glm::vec3 camPos;
+        camPos.x = camRadius * cos(camYaw) * cos(camPitch);
+        camPos.y = camRadius * sin(camPitch);
+        camPos.z = camRadius * sin(camYaw) * cos(camPitch);
 
         UniformBufferObject ubo{};
         ubo.model = glm::mat4(1.0f);
@@ -297,7 +315,7 @@ int main(int argc, char* argv[]) {
 
         // Render pass
         VkClearValue clearValues[2];
-        clearValues[0].color        = { { 0.1f, 0.1f, 0.15f, 1.0f } };
+        clearValues[0].color        = { { 0.3f, 0.5f, 0.7f, 1.0f } }; // steel blue — visible, not black
         clearValues[1].depthStencil = { 1.0f, 0 };
 
         VkRenderPassBeginInfo rpInfo{};
