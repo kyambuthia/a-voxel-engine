@@ -59,7 +59,10 @@ public:
     // Framebuffer for a given swapchain image index
     VkFramebuffer framebuffer(uint32_t index) const { return m_swapchainFramebuffers[index]; }
 
-    // Recreate swapchain (e.g. on window resize)
+    // Recreate swapchain (e.g. on window resize).
+    // Destroys and recreates framebuffers, depth resources, image views,
+    // swapchain, AND sync objects.  Caller must reallocate any per-image
+    // resources (uniform buffers, command buffers, descriptor sets).
     void recreateSwapchain();
 
 private:

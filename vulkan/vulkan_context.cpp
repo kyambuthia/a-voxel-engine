@@ -824,12 +824,27 @@ void VulkanContext::recreateSwapchain() {
 
     vkDeviceWaitIdle(m_device);
 
+    // Destroy old sync objects (sized by the old image count)
+    for (size_t i = 0; i < m_imageAvailableSemaphores.size(); ++i) {
+        vkDestroySemaphore(m_device, m_imageAvailableSemaphores[i], nullptr);
+        vkDestroySemaphore(m_device, m_renderFinishedSemaphores[i], nullptr);
+        vkDestroyFence(m_device, m_inFlightFences[i], nullptr);
+    }
+    m_imageAvailableSemaphores.clear();
+    m_renderFinishedSemaphores.clear();
+    m_inFlightFences.clear();
+
     cleanupSwapchain();
 
     createSwapchain();
     createImageViews();
     createDepthResources();
     createFramebuffers();
+    createSyncObjects();  // re-sized and re-created for new imageCount()
+
+    // Reset image indices to safe defaults — the old values may be >= new count
+    m_currentSwapchainImage = 0;
+    m_acquireImageIdx      = 0;
 }
 
 // -----------------------------------------------------------------------------

@@ -7,19 +7,18 @@
 #include <cstdlib>
 #include <chrono>
 #include <string>
-#include <libgen.h>
 #include <filesystem>
 
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
 
 // -----------------------------------------------------------------------------
-// Window callbacks
+// Forward declarations
 // -----------------------------------------------------------------------------
-static void onResize(GLFWwindow* window, int /*w*/, int /*h*/) {
-    auto ctx = static_cast<VulkanContext*>(glfwGetWindowUserPointer(window));
-    if (ctx) ctx->recreateSwapchain();
-}
+static std::string getExeDir();
+static void reallocatePerImageResources(VulkanContext& ctx, VulkanPipeline& pipeline,
+                                         std::vector<VulkanBuffer>& uniformBuffers,
+                                         std::vector<VkCommandBuffer>& commandBuffers);
 
 // -----------------------------------------------------------------------------
 // Returns the directory containing the executable
@@ -34,10 +33,82 @@ static std::string getExeDir() {
 }
 
 // -----------------------------------------------------------------------------
+// Reallocate all per-image resources when swapchain image count changes.
+// -----------------------------------------------------------------------------
+static void reallocatePerImageResources(VulkanContext& ctx, VulkanPipeline& pipeline,
+                                         std::vector<VulkanBuffer>& uniformBuffers,
+                                         std::vector<VkCommandBuffer>& commandBuffers)
+{
+    VkDevice device = ctx.device();
+    uint32_t count  = ctx.imageCount();
+
+    // -- Free old command buffers --
+    if (!commandBuffers.empty()) {
+        vkFreeCommandBuffers(device, ctx.commandPool(),
+                             static_cast<uint32_t>(commandBuffers.size()),
+                             commandBuffers.data());
+    }
+
+    // -- Destroy old uniform buffers --
+    for (auto& ub : uniformBuffers) {
+        ub.cleanup();
+    }
+
+    // -- Destroy old descriptor pool --
+    vkDestroyDescriptorPool(device, pipeline.descriptorPool(), nullptr);
+
+    // -- Reallocate uniform buffers --
+    uniformBuffers.resize(count);
+    for (uint32_t i = 0; i < count; ++i) {
+        uniformBuffers[i].init(&ctx, sizeof(UniformBufferObject),
+                               VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+                               VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                               VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    }
+
+    // -- Reallocate descriptor pool + sets --
+    pipeline.createDescriptorPool(count);
+    pipeline.createDescriptorSets(count);
+
+    // -- Update descriptor sets to point to new uniform buffers --
+    for (uint32_t i = 0; i < count; ++i) {
+        VkDescriptorBufferInfo bufferInfo{};
+        bufferInfo.buffer = uniformBuffers[i].buffer();
+        bufferInfo.offset = 0;
+        bufferInfo.range  = sizeof(UniformBufferObject);
+
+        VkWriteDescriptorSet write{};
+        write.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        write.dstSet          = pipeline.descriptorSet(i);
+        write.dstBinding      = 0;
+        write.descriptorType  = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        write.descriptorCount = 1;
+        write.pBufferInfo     = &bufferInfo;
+
+        vkUpdateDescriptorSets(device, 1, &write, 0, nullptr);
+    }
+
+    // -- Reallocate command buffers --
+    commandBuffers.resize(count);
+    VkCommandBufferAllocateInfo allocInfo{};
+    allocInfo.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    allocInfo.commandPool        = ctx.commandPool();
+    allocInfo.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    allocInfo.commandBufferCount = count;
+
+    VkResult result = vkAllocateCommandBuffers(device, &allocInfo, commandBuffers.data());
+    if (result != VK_SUCCESS) {
+        std::cerr << "Failed to allocate command buffers after resize.\n";
+        std::abort();
+    }
+}
+
+// -----------------------------------------------------------------------------
 // Main
 // -----------------------------------------------------------------------------
 int main() {
     std::string exeDir = getExeDir();
+
     // --- GLFW init ---
     if (!glfwInit()) {
         std::cerr << "Failed to initialize GLFW.\n";
@@ -58,7 +129,8 @@ int main() {
     VulkanContext ctx;
     ctx.init(window);
     glfwSetWindowUserPointer(window, &ctx);
-    glfwSetFramebufferSizeCallback(window, onResize);
+    // Swapchain recreation is handled via VK_ERROR_OUT_OF_DATE_KHR in
+    // beginFrame / submitFrame — no inline resize callback needed.
 
     // --- Pipeline ---
     PipelineConfig pipeConfig{};
@@ -80,7 +152,7 @@ int main() {
     VulkanMesh cube;
     cube.init(&ctx, cubeData);
 
-    // --- Uniform buffers (one per frame) ---
+    // --- Uniform buffers (one per swapchain image) ---
     std::vector<VulkanBuffer> uniformBuffers(ctx.imageCount());
     for (uint32_t i = 0; i < ctx.imageCount(); ++i) {
         uniformBuffers[i].init(&ctx, sizeof(UniformBufferObject),
@@ -107,18 +179,20 @@ int main() {
         vkUpdateDescriptorSets(ctx.device(), 1, &write, 0, nullptr);
     }
 
-    // --- Command buffers ---
+    // --- Command buffers (one per swapchain image) ---
     std::vector<VkCommandBuffer> commandBuffers(ctx.imageCount());
-    VkCommandBufferAllocateInfo allocInfo{};
-    allocInfo.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    allocInfo.commandPool        = ctx.commandPool();
-    allocInfo.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    allocInfo.commandBufferCount = ctx.imageCount();
+    {
+        VkCommandBufferAllocateInfo allocInfo{};
+        allocInfo.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+        allocInfo.commandPool        = ctx.commandPool();
+        allocInfo.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        allocInfo.commandBufferCount = ctx.imageCount();
 
-    VkResult result = vkAllocateCommandBuffers(ctx.device(), &allocInfo, commandBuffers.data());
-    if (result != VK_SUCCESS) {
-        std::cerr << "Failed to allocate command buffers.\n";
-        return EXIT_FAILURE;
+        VkResult result = vkAllocateCommandBuffers(ctx.device(), &allocInfo, commandBuffers.data());
+        if (result != VK_SUCCESS) {
+            std::cerr << "Failed to allocate command buffers.\n";
+            return EXIT_FAILURE;
+        }
     }
 
     // --- Camera state ---
@@ -159,8 +233,14 @@ int main() {
                                      0.1f, 100.0f);
         ubo.proj[1][1] *= -1.0f; // Vulkan Y-flip
 
-        // --- Begin frame ---
+        // --- Begin frame (handles swapchain recreation on VK_ERROR_OUT_OF_DATE_KHR) ---
         if (!ctx.beginFrame()) continue;
+
+        // If the swapchain image count changed (e.g. after recreation triggered by
+        // the out-of-date path above), reallocate all per-image resources.
+        if (ctx.imageCount() != uniformBuffers.size()) {
+            reallocatePerImageResources(ctx, pipeline, uniformBuffers, commandBuffers);
+        }
 
         // Upload UBO for the swapchain image we just acquired
         uniformBuffers[ctx.currentSwapchainImage()].upload(&ubo, sizeof(ubo));
@@ -228,6 +308,20 @@ int main() {
         ctx.submitFrame(cmd);
     }
 
+    // --- Cleanup: destroy child resources before the device ---
+    // Free command buffers
+    if (!commandBuffers.empty()) {
+        vkFreeCommandBuffers(ctx.device(), ctx.commandPool(),
+                             static_cast<uint32_t>(commandBuffers.size()),
+                             commandBuffers.data());
+    }
+    // Destroy uniform buffers
+    for (auto& ub : uniformBuffers) ub.cleanup();
+    // Destroy pipeline (descriptor pool, sets, pipeline, layout)
+    pipeline.cleanup();
+    // Destroy mesh
+    cube.cleanup();
+    // Destroy device-level resources (sync objects, swapchain, etc.)
     ctx.cleanup();
 
     glfwDestroyWindow(window);
