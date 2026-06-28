@@ -159,10 +159,11 @@ int main() {
                                      0.1f, 100.0f);
         ubo.proj[1][1] *= -1.0f; // Vulkan Y-flip
 
-        uniformBuffers[ctx.currentSwapchainImage()].upload(&ubo, sizeof(ubo));
-
         // --- Begin frame ---
         if (!ctx.beginFrame()) continue;
+
+        // Upload UBO for the swapchain image we just acquired
+        uniformBuffers[ctx.currentSwapchainImage()].upload(&ubo, sizeof(ubo));
 
         // --- Record command buffer ---
         VkCommandBuffer cmd = commandBuffers[ctx.currentSwapchainImage()];
