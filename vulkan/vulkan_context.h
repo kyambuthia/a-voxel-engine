@@ -63,6 +63,13 @@ public:
     // resources (uniform buffers, command buffers, descriptor sets).
     void recreateSwapchain();
 
+    // Android lifecycle: pause destroys surface + swapchain,
+    // resume recreates them.  Caller must reallocate per-image
+    // resources after resume (uniform buffers, command buffers,
+    // descriptor sets).
+    void handlePause();
+    void handleResume(SDL_Window* window);
+
 private:
     // --- Window ---
     SDL_Window*      m_window            = nullptr;

@@ -794,16 +794,24 @@ void VulkanContext::createSyncObjects() {
 // -----------------------------------------------------------------------------
 void VulkanContext::cleanupSwapchain() {
     vkDestroyImageView(m_device, m_depthImageView, nullptr);
+    m_depthImageView = VK_NULL_HANDLE;
+
     vkDestroyImage(m_device, m_depthImage, nullptr);
+    m_depthImage = VK_NULL_HANDLE;
+
     vkFreeMemory(m_device, m_depthImageMemory, nullptr);
+    m_depthImageMemory = VK_NULL_HANDLE;
 
     for (auto fb : m_swapchainFramebuffers)
         vkDestroyFramebuffer(m_device, fb, nullptr);
+    m_swapchainFramebuffers.clear();
 
     for (auto iv : m_swapchainImageViews)
         vkDestroyImageView(m_device, iv, nullptr);
+    m_swapchainImageViews.clear();
 
     vkDestroySwapchainKHR(m_device, m_swapchain, nullptr);
+    m_swapchain = VK_NULL_HANDLE;
 }
 
 void VulkanContext::recreateSwapchain() {
@@ -836,6 +844,56 @@ void VulkanContext::recreateSwapchain() {
     createSyncObjects();  // re-sized and re-created for new imageCount()
 
     // Reset image indices to safe defaults — the old values may be >= new count
+    m_currentSwapchainImage = 0;
+    m_acquireImageIdx      = 0;
+}
+
+// -----------------------------------------------------------------------------
+// Android lifecycle: pause / resume
+// -----------------------------------------------------------------------------
+void VulkanContext::handlePause() {
+    if (!m_device) return;
+
+    vkDeviceWaitIdle(m_device);
+
+    // Destroy sync objects (sized by image count — will be recreated on resume)
+    for (size_t i = 0; i < m_imageAvailableSemaphores.size(); ++i) {
+        vkDestroySemaphore(m_device, m_imageAvailableSemaphores[i], nullptr);
+        vkDestroySemaphore(m_device, m_renderFinishedSemaphores[i], nullptr);
+        vkDestroyFence(m_device, m_inFlightFences[i], nullptr);
+    }
+    m_imageAvailableSemaphores.clear();
+    m_renderFinishedSemaphores.clear();
+    m_inFlightFences.clear();
+
+    // Destroy swapchain and all surface-dependent resources
+    cleanupSwapchain();
+
+    // Destroy the surface — the underlying native window is gone on Android.
+    vkDestroySurfaceKHR(m_instance, m_surface, nullptr);
+    m_surface = VK_NULL_HANDLE;
+}
+
+void VulkanContext::handleResume(SDL_Window* window) {
+    m_window = window;
+
+    // Recreate the Vulkan surface for the new native window
+    if (!SDL_Vulkan_CreateSurface(window, m_instance, nullptr, &m_surface)) {
+        std::cerr << "[FATAL] Failed to recreate Vulkan surface: "
+                  << SDL_GetError() << "\n";
+        std::abort();
+    }
+
+    // Recreate swapchain and all surface-dependent resources.
+    // The physical/logical device, render pass, and command pool are
+    // preserved across the pause/resume cycle.
+    createSwapchain();
+    createImageViews();
+    createDepthResources();
+    createFramebuffers();
+    createSyncObjects();
+
+    // Reset image indices to safe defaults
     m_currentSwapchainImage = 0;
     m_acquireImageIdx      = 0;
 }

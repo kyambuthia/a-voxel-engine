@@ -210,16 +210,37 @@ int main() {
 
     // --- Main loop ---
     std::cout << "Entering main loop.\n";
-    bool quit = false;
+    bool quit    = false;
+    bool paused  = false;
     while (!quit) {
         // Poll SDL events
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
             if (e.type == SDL_EVENT_QUIT) {
                 quit = true;
+            } else if (e.type == SDL_EVENT_DID_ENTER_BACKGROUND) {
+                // Android: activity paused, native window destroyed.
+                // Destroy all surface-dependent resources.
+                ctx.handlePause();
+                paused = true;
+            } else if (e.type == SDL_EVENT_DID_ENTER_FOREGROUND) {
+                // Android: activity resumed, new native window ready.
+                // Recreate surface + swapchain + all dependent resources.
+                ctx.handleResume(window);
+
+                // Reallocate per-image resources for the new swapchain image count.
+                reallocatePerImageResources(ctx, pipeline, uniformBuffers, commandBuffers);
+
+                paused = false;
             }
         }
         if (quit) break;
+
+        // Skip rendering while paused (surface is gone).
+        if (paused) {
+            SDL_Delay(16); // ~60 Hz sleep to avoid busy-waiting
+            continue;
+        }
 
         // --- Update UBO ---
         auto currentTime = std::chrono::high_resolution_clock::now();
