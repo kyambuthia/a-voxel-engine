@@ -9,7 +9,6 @@
 #include <string>
 #include <filesystem>
 
-#define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
 
 // -----------------------------------------------------------------------------
@@ -227,10 +226,10 @@ int main() {
         UniformBufferObject ubo{};
         ubo.model = glm::mat4(1.0f);
         ubo.view  = glm::lookAt(camPos, camTarget, camUp);
-        ubo.proj  = glm::perspective(glm::radians(60.0f),
-                                     static_cast<float>(ctx.swapchainExtent().width) /
-                                     static_cast<float>(ctx.swapchainExtent().height),
-                                     0.1f, 100.0f);
+        ubo.proj  = glm::perspectiveRH_ZO(glm::radians(60.0f),
+                                          static_cast<float>(ctx.swapchainExtent().width) /
+                                          static_cast<float>(ctx.swapchainExtent().height),
+                                          0.1f, 100.0f);
         ubo.proj[1][1] *= -1.0f; // Vulkan Y-flip
 
         // --- Begin frame (handles swapchain recreation on VK_ERROR_OUT_OF_DATE_KHR) ---

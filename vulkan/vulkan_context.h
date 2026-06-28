@@ -2,7 +2,6 @@
 
 #include "vulkan_types.h"
 #include <vulkan/vulkan.h>
-#define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
 #include <memory>
 
@@ -28,7 +27,6 @@ public:
 
     // Frame acquire / present
     bool beginFrame();
-    void endFrame();
     void submitFrame(VkCommandBuffer cmd);
 
     // Helpers

@@ -56,6 +56,9 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     ${GLFW3_LIBRARIES}
 )
 
+# --- Compile definitions ---
+target_compile_definitions(${PROJECT_NAME} PRIVATE GLFW_INCLUDE_NONE)
+
 # --- Compiler warnings ---
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(${PROJECT_NAME} PRIVATE -Wall -Wextra -Wpedantic)

@@ -117,10 +117,6 @@ bool VulkanContext::beginFrame() {
     return true;
 }
 
-void VulkanContext::endFrame() {
-    // Nothing to do
-}
-
 void VulkanContext::submitFrame(VkCommandBuffer cmd) {
     uint32_t img = m_currentSwapchainImage;
 
