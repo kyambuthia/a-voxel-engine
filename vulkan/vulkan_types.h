@@ -20,7 +20,7 @@
         if (_vr != VK_SUCCESS) {                                          \
             std::cerr << "[VK_ERROR] " << #f << " returned " << _vr       \
                       << " at " << __FILE__ << ":" << __LINE__ << "\n";   \
-            assert(false);                                                \
+            std::abort();                                                 \
         }                                                                 \
     } while (0)
 

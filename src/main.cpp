@@ -9,6 +9,7 @@
 #include <string>
 
 #include <SDL3/SDL.h>
+#include <SDL3/SDL_main.h>
 #include <SDL3/SDL_vulkan.h>
 
 // -----------------------------------------------------------------------------
@@ -110,7 +111,9 @@ static void reallocatePerImageResources(VulkanContext& ctx, VulkanPipeline& pipe
 // -----------------------------------------------------------------------------
 // Main
 // -----------------------------------------------------------------------------
-int main() {
+int main(int argc, char* argv[]) {
+    (void)argc; // unused on most platforms
+    (void)argv;
     std::string exeDir = getExeDir();
 
     // --- SDL3 init ---
@@ -141,8 +144,15 @@ int main() {
                             static_cast<float>(ctx.swapchainExtent().height),
                             0.0f, 1.0f };
     pipeConfig.scissor  = { {0, 0}, ctx.swapchainExtent() };
+#ifdef __ANDROID__
+    // On Android, shaders are inside the APK assets — use relative paths.
+    // SDL_LoadFile resolves these via the asset manager.
+    pipeConfig.vertShaderPath = "shaders/main.vert.spv";
+    pipeConfig.fragShaderPath = "shaders/main.frag.spv";
+#else
     pipeConfig.vertShaderPath = exeDir + "/shaders/main.vert.spv";
     pipeConfig.fragShaderPath = exeDir + "/shaders/main.frag.spv";
+#endif
 
     VulkanPipeline pipeline;
     pipeline.init(&ctx, pipeConfig);

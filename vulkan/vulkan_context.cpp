@@ -448,7 +448,8 @@ void VulkanContext::createLogicalDevice() {
 
     VkPhysicalDeviceFeatures features{};
     features.samplerAnisotropy = VK_TRUE;
-    features.fillModeNonSolid  = VK_TRUE; // for wireframe if desired
+    // fillModeNonSolid deliberately omitted — no wireframe rendering yet,
+    // and many mobile GPUs (e.g. MediaTek, Adreno 5xx) don't support it.
 
     VkDeviceCreateInfo createInfo{};
     createInfo.sType                   = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
