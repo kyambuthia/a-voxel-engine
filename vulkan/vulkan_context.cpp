@@ -686,11 +686,15 @@ void VulkanContext::createRenderPass() {
         attachments = { colorAttachment, depthAttachment };
     }
 
+    // External subpass dependency: wait at the top of the pipeline for the
+    // previous frame's rendering to complete (the semaphore in vkQueueSubmit
+    // already guarantees this), then block until the image layout transition
+    // (VK_IMAGE_LAYOUT_UNDEFINED → COLOR_ATTACHMENT_OPTIMAL + depth) finishes
+    // before we write to color/depth attachments.
     VkSubpassDependency dep{};
     dep.srcSubpass    = VK_SUBPASS_EXTERNAL;
     dep.dstSubpass    = 0;
-    dep.srcStageMask  = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
-                        VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+    dep.srcStageMask  = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
     dep.dstStageMask  = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
                         VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
     dep.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
