@@ -1,4 +1,5 @@
 #include "vulkan_context.h"
+#include <SDL3/SDL_vulkan.h>
 #include <cassert>
 #include <cstring>
 #include <iostream>
@@ -31,7 +32,7 @@ VulkanContext::~VulkanContext() {
 // -----------------------------------------------------------------------------
 // init
 // -----------------------------------------------------------------------------
-void VulkanContext::init(GLFWwindow* window) {
+void VulkanContext::init(SDL_Window* window) {
     m_window = window;
 
     createInstance();
@@ -106,7 +107,10 @@ bool VulkanContext::beginFrame() {
         recreateSwapchain();
         return false;
     }
-    assert(result == VK_SUCCESS || result == VK_SUBOPTIMAL_KHR);
+    if (result != VK_SUCCESS) {
+        std::cerr << "[VK_WARN] vkAcquireNextImageKHR returned " << result
+                  << " at " << __FILE__ << ":" << __LINE__ << "\n";
+    }
 
     // Reset the fence for the image we just acquired.  It was signaled
     // from the wait above (signaled from previous render to this image)
@@ -173,8 +177,9 @@ uint32_t VulkanContext::findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlag
             return i;
         }
     }
-    assert(false && "Failed to find suitable memory type");
-    return UINT32_MAX;
+    std::cerr << "[FATAL] Failed to find suitable memory type at "
+              << __FILE__ << ":" << __LINE__ << "\n";
+    std::abort();
 }
 
 // -----------------------------------------------------------------------------
@@ -299,8 +304,11 @@ VKAPI_ATTR VkBool32 VKAPI_CALL VulkanContext::debugCallback(
 // -----------------------------------------------------------------------------
 // Surface
 // -----------------------------------------------------------------------------
-void VulkanContext::createSurface(GLFWwindow* window) {
-    VK_CHECK(glfwCreateWindowSurface(m_instance, window, nullptr, &m_surface));
+void VulkanContext::createSurface(SDL_Window* window) {
+    if (!SDL_Vulkan_CreateSurface(window, m_instance, nullptr, &m_surface)) {
+        std::cerr << "Failed to create Vulkan surface: " << SDL_GetError() << "\n";
+        assert(false);
+    }
 }
 
 // -----------------------------------------------------------------------------
@@ -502,7 +510,7 @@ void VulkanContext::createSwapchain() {
         m_swapchainExtent = caps.currentExtent;
     } else {
         int w, h;
-        glfwGetFramebufferSize(m_window, &w, &h);
+        SDL_GetWindowSizeInPixels(m_window, &w, &h);
         m_swapchainExtent = {
             std::clamp(static_cast<uint32_t>(w), caps.minImageExtent.width, caps.maxImageExtent.width),
             std::clamp(static_cast<uint32_t>(h), caps.minImageExtent.height, caps.maxImageExtent.height)
@@ -801,8 +809,10 @@ void VulkanContext::cleanupSwapchain() {
 void VulkanContext::recreateSwapchain() {
     int w = 0, h = 0;
     while (w == 0 || h == 0) {
-        glfwGetFramebufferSize(m_window, &w, &h);
-        glfwWaitEvents();
+        SDL_GetWindowSizeInPixels(m_window, &w, &h);
+        if (w == 0 || h == 0) {
+            SDL_WaitEvent(nullptr);  // Block until next event (e.g. window restore)
+        }
     }
 
     vkDeviceWaitIdle(m_device);
@@ -835,9 +845,12 @@ void VulkanContext::recreateSwapchain() {
 // -----------------------------------------------------------------------------
 std::vector<const char*> VulkanContext::getRequiredExtensions() const {
     uint32_t count;
-    const char** glfwExts = glfwGetRequiredInstanceExtensions(&count);
+    char const * const * sdlExts = SDL_Vulkan_GetInstanceExtensions(&count);
 
-    std::vector<const char*> exts(glfwExts, glfwExts + count);
+    std::vector<const char*> exts;
+    for (uint32_t i = 0; i < count; ++i) {
+        exts.push_back(sdlExts[i]);
+    }
     if (m_enableValidation) {
         exts.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
     }

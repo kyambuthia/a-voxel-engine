@@ -2,7 +2,7 @@
 
 #include "vulkan_types.h"
 #include <vulkan/vulkan.h>
-#include <GLFW/glfw3.h>
+#include <SDL3/SDL.h>
 #include <memory>
 
 // -----------------------------------------------------------------------------
@@ -19,11 +19,11 @@ public:
     VulkanContext& operator=(const VulkanContext&) = delete;
 
     // Initialization
-    void init(GLFWwindow* window);
+    void init(SDL_Window* window);
     void cleanup();
 
     // For framebuffer size queries
-    GLFWwindow* window() const { return m_window; }
+    SDL_Window* window() const { return m_window; }
 
     // Frame acquire / present
     bool beginFrame();
@@ -65,7 +65,7 @@ public:
 
 private:
     // --- Window ---
-    GLFWwindow*      m_window            = nullptr;
+    SDL_Window*      m_window            = nullptr;
 
     // --- Instance & Debug ---
     VkInstance       m_instance          = VK_NULL_HANDLE;
@@ -129,7 +129,7 @@ private:
     void setupDebugMessenger();
     void pickPhysicalDevice();
     void createLogicalDevice();
-    void createSurface(GLFWwindow* window);
+    void createSurface(SDL_Window* window);
     void createSwapchain();
     void createImageViews();
     void createDepthResources();

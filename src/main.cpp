@@ -7,9 +7,9 @@
 #include <cstdlib>
 #include <chrono>
 #include <string>
-#include <filesystem>
 
-#include <GLFW/glfw3.h>
+#include <SDL3/SDL.h>
+#include <SDL3/SDL_vulkan.h>
 
 // -----------------------------------------------------------------------------
 // Forward declarations
@@ -23,10 +23,15 @@ static void reallocatePerImageResources(VulkanContext& ctx, VulkanPipeline& pipe
 // Returns the directory containing the executable
 // -----------------------------------------------------------------------------
 static std::string getExeDir() {
-    std::error_code ec;
-    auto p = std::filesystem::read_symlink("/proc/self/exe", ec);
-    if (!ec) {
-        return std::filesystem::absolute(p).parent_path().string();
+    const char* base = SDL_GetBasePath();
+    if (base) {
+        std::string result(base);
+        SDL_free(const_cast<char*>(base));
+        // SDL_GetBasePath returns path with trailing separator; remove it
+        if (!result.empty() && result.back() == '/') {
+            result.pop_back();
+        }
+        return result;
     }
     return ".";
 }
@@ -108,26 +113,24 @@ static void reallocatePerImageResources(VulkanContext& ctx, VulkanPipeline& pipe
 int main() {
     std::string exeDir = getExeDir();
 
-    // --- GLFW init ---
-    if (!glfwInit()) {
-        std::cerr << "Failed to initialize GLFW.\n";
+    // --- SDL3 init ---
+    if (!SDL_Init(SDL_INIT_VIDEO)) {
+        std::cerr << "Failed to initialize SDL3: " << SDL_GetError() << "\n";
         return EXIT_FAILURE;
     }
-    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
 
     const int WIDTH = 1280, HEIGHT = 720;
-    GLFWwindow* window = glfwCreateWindow(WIDTH, HEIGHT, "a-voxel-engine", nullptr, nullptr);
+    SDL_Window* window = SDL_CreateWindow("a-voxel-engine", WIDTH, HEIGHT,
+                                          SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE);
     if (!window) {
-        std::cerr << "Failed to create GLFW window.\n";
-        glfwTerminate();
+        std::cerr << "Failed to create window: " << SDL_GetError() << "\n";
+        SDL_Quit();
         return EXIT_FAILURE;
     }
 
     // --- Vulkan context ---
     VulkanContext ctx;
     ctx.init(window);
-    glfwSetWindowUserPointer(window, &ctx);
     // Swapchain recreation is handled via VK_ERROR_OUT_OF_DATE_KHR in
     // beginFrame / submitFrame — no inline resize callback needed.
 
@@ -207,8 +210,16 @@ int main() {
 
     // --- Main loop ---
     std::cout << "Entering main loop.\n";
-    while (!glfwWindowShouldClose(window)) {
-        glfwPollEvents();
+    bool quit = false;
+    while (!quit) {
+        // Poll SDL events
+        SDL_Event e;
+        while (SDL_PollEvent(&e)) {
+            if (e.type == SDL_EVENT_QUIT) {
+                quit = true;
+            }
+        }
+        if (quit) break;
 
         // --- Update UBO ---
         auto currentTime = std::chrono::high_resolution_clock::now();
@@ -319,8 +330,8 @@ int main() {
     // Destroy device-level resources (sync objects, swapchain, etc.)
     ctx.cleanup();
 
-    glfwDestroyWindow(window);
-    glfwTerminate();
+    SDL_DestroyWindow(window);
+    SDL_Quit();
 
     std::cout << "Shutdown complete.\n";
     return EXIT_SUCCESS;

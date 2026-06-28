@@ -11,8 +11,12 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # --- Dependencies ---
 find_package(Vulkan REQUIRED)
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(GLFW3 REQUIRED glfw3)
+
+# SDL3 as a vendored submodule
+add_subdirectory(dependencies/SDL)
+
+# GLM as a vendored submodule (header-only math library)
+add_subdirectory(dependencies/glm)
 
 # --- Sources ---
 set(VULKAN_SOURCES
@@ -37,8 +41,14 @@ set(VULKAN_HEADERS
     vulkan/vulkan_types.h
 )
 
-# --- Executable ---
-add_executable(${PROJECT_NAME} ${SOURCES} ${VULKAN_HEADERS})
+# --- Target ---
+# Android produces a shared library (.so) loaded by SDLActivity.java;
+# all other platforms produce an executable.
+if(ANDROID)
+    add_library(${PROJECT_NAME} SHARED ${SOURCES} ${VULKAN_HEADERS})
+else()
+    add_executable(${PROJECT_NAME} ${SOURCES} ${VULKAN_HEADERS})
+endif()
 
 # --- Include directories ---
 target_include_directories(${PROJECT_NAME} PRIVATE
@@ -46,25 +56,28 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_SOURCE_DIR}/vulkan
     ${CMAKE_SOURCE_DIR}/src
     ${Vulkan_INCLUDE_DIRS}
-    ${GLFW3_INCLUDE_DIRS}
-    /usr/include
 )
 
 # --- Link libraries ---
 target_link_libraries(${PROJECT_NAME} PRIVATE
     ${Vulkan_LIBRARIES}
-    ${GLFW3_LIBRARIES}
+    SDL3::SDL3
+    glm::glm
 )
 
-# --- Compile definitions ---
-target_compile_definitions(${PROJECT_NAME} PRIVATE GLFW_INCLUDE_NONE)
-
-# --- Compiler warnings ---
-if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+# --- Compiler warnings (not NDK — it has its own flags) ---
+if(NOT ANDROID AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(${PROJECT_NAME} PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
-# --- Custom command: compile shaders with glslc ---
+# --- Sanitizers (desktop debug builds only) ---
+if(NOT ANDROID AND CMAKE_BUILD_TYPE STREQUAL "Debug" AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(${PROJECT_NAME} PRIVATE -fsanitize=address -fsanitize=undefined)
+    target_link_options(${PROJECT_NAME} PRIVATE -fsanitize=address -fsanitize=undefined)
+    message(STATUS "Sanitizers enabled: ASAN + UBSAN")
+endif()
+
+# --- Shaders: compile with glslc ---
 file(GLOB SHADER_SOURCES shaders/*.vert shaders/*.frag)
 foreach(SHADER ${SHADER_SOURCES})
     get_filename_component(SHADER_NAME ${SHADER} NAME)
@@ -79,16 +92,23 @@ foreach(SHADER ${SHADER_SOURCES})
     list(APPEND SHADER_SPVS ${SPV_OUTPUT})
 endforeach()
 
-# Make sure shaders are built before the executable
+# Make sure shaders are built before the target
 if(SHADER_SPVS)
     add_custom_target(compile_shaders ALL DEPENDS ${SHADER_SPVS})
     add_dependencies(${PROJECT_NAME} compile_shaders)
 endif()
 
-# Copy compiled shaders to the build directory
+# Copy compiled shaders to the output directory
+# Desktop: next to the executable
+# Android: into the Gradle assets dir for APK packaging
+if(ANDROID)
+    set(SHADER_OUTPUT_DIR "${CMAKE_SOURCE_DIR}/android/app/src/main/assets/shaders")
+else()
+    set(SHADER_OUTPUT_DIR "$<TARGET_FILE_DIR:${PROJECT_NAME}>/shaders")
+endif()
 add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
         "${CMAKE_BINARY_DIR}/shaders"
-        "$<TARGET_FILE_DIR:${PROJECT_NAME}>/shaders"
-    COMMENT "Copying compiled shaders to target directory"
+        "${SHADER_OUTPUT_DIR}"
+    COMMENT "Copying compiled shaders to ${SHADER_OUTPUT_DIR}"
 )
