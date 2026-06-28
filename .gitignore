@@ -31,5 +31,6 @@ compile_commands.json
 
 # Android
 android/.gradle/
+android/app/.cxx/
 android/app/build/
 android/app/src/main/assets/shaders/
