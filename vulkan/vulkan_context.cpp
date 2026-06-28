@@ -82,19 +82,24 @@ void VulkanContext::cleanup() {
 // Frame management
 // -----------------------------------------------------------------------------
 bool VulkanContext::beginFrame() {
-    // Wait for previous work on the NEXT image we'll acquire, then reset
-    // (we fence by swapchain image index so each image has its own serialization)
-    uint32_t fenceIdx = m_currentSwapchainImage;
-    vkWaitForFences(m_device, 1, &m_inFlightFences[fenceIdx], VK_TRUE, UINT64_MAX);
-    vkResetFences(m_device, 1, &m_inFlightFences[fenceIdx]);
+    // The acquire semaphore is indexed by the *outgoing* swapchain image
+    // (the one we last acquired and submitted work for).  Save it before
+    // m_currentSwapchainImage changes.
+    m_acquireImageIdx = m_currentSwapchainImage;
 
-    // Acquire next image.  semaphore[fenceIdx] must be unsignaled — it was
-    // consumed by vkQueueSubmit on the previous frame using this image index.
-    // vkAcquireNextImageKHR will signal it when the presentation engine
-    // releases the newly acquired image.
+    // Wait for the GPU to finish using the outgoing image.
+    // All fences are created signaled, so the very first call passes.
+    vkWaitForFences(m_device, 1, &m_inFlightFences[m_acquireImageIdx],
+                    VK_TRUE, UINT64_MAX);
+
+    // Acquire the next swapchain image.
+    // m_imageAvailableSemaphores[m_acquireImageIdx] is unsignaled
+    // (consumed by vkQueueSubmit the last time this image was rendered
+    // to).  vkAcquireNextImageKHR will signal it when the presentation
+    // engine releases the outgoing image.
     VkResult result = vkAcquireNextImageKHR(
         m_device, m_swapchain, UINT64_MAX,
-        m_imageAvailableSemaphores[fenceIdx],
+        m_imageAvailableSemaphores[m_acquireImageIdx],
         VK_NULL_HANDLE, &m_currentSwapchainImage);
 
     if (result == VK_ERROR_OUT_OF_DATE_KHR) {
@@ -102,6 +107,12 @@ bool VulkanContext::beginFrame() {
         return false;
     }
     assert(result == VK_SUCCESS || result == VK_SUBOPTIMAL_KHR);
+
+    // Reset the fence for the image we just acquired.  It was signaled
+    // from the wait above (signaled from previous render to this image)
+    // or signaled from creation (first use).  Either way, resetting is
+    // safe — we want it unsignaled so vkQueueSubmit can re-signal it.
+    vkResetFences(m_device, 1, &m_inFlightFences[m_currentSwapchainImage]);
 
     return true;
 }
@@ -113,15 +124,22 @@ void VulkanContext::endFrame() {
 void VulkanContext::submitFrame(VkCommandBuffer cmd) {
     uint32_t img = m_currentSwapchainImage;
 
-    // Wait for the acquire semaphore (signaled when presentation engine
-    // releases the image), then render.  Signal the render-finished semaphore
-    // and the per-image fence so beginFrame can wait next time around.
+    // Wait on the acquire semaphore that was passed to
+    // vkAcquireNextImageKHR in beginFrame.  That semaphore corresponds
+    // to the *outgoing* image (m_acquireImageIdx).  The presentation
+    // engine signaled it when that image was released for reuse.
+    // We wait here before writing to the new image's color attachment.
+    //
+    // Signal the render-finished semaphore for the NEW image so that
+    // vkQueuePresentKHR waits for rendering to complete.
+    // Signal the per-image fence for the NEW image so beginFrame can
+    // wait on it next time this image is acquired.
     VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
 
     VkSubmitInfo submitInfo{};
     submitInfo.sType              = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submitInfo.waitSemaphoreCount = 1;
-    submitInfo.pWaitSemaphores    = &m_imageAvailableSemaphores[img];
+    submitInfo.pWaitSemaphores    = &m_imageAvailableSemaphores[m_acquireImageIdx];
     submitInfo.pWaitDstStageMask  = &waitStage;
     submitInfo.commandBufferCount = 1;
     submitInfo.pCommandBuffers    = &cmd;
@@ -757,6 +775,9 @@ void VulkanContext::createCommandPool() {
 // Sync objects
 // -----------------------------------------------------------------------------
 void VulkanContext::createSyncObjects() {
+    // Create one semaphore pair and one fence per swapchain image.
+    // Each image has its own acquire/render semaphores and fence,
+    // preventing "semaphore still in use" validation warnings.
     uint32_t count = imageCount();
     m_imageAvailableSemaphores.resize(count);
     m_renderFinishedSemaphores.resize(count);

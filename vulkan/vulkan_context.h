@@ -106,10 +106,22 @@ private:
     VkCommandPool    m_commandPool       = VK_NULL_HANDLE;
 
     // --- Sync ---
+    // Semaphores and fences are indexed by swapchain image index.
+    // Each swapchain image has its own acquire semaphore, render-finished
+    // semaphore, and fence.  This ensures a semaphore is never reused
+    // while the presentation engine still holds it.
+    // On first frame, all fences are created signaled so the initial
+    // wait passes immediately.
+    //
+    // In beginFrame we acquire with semaphore[oldImage], then store
+    // oldImage in m_acquireImageIdx so submitFrame can wait on the
+    // correct acquire semaphore (the one the presentation engine
+    // signaled, which corresponds to the old image, not the new one).
     std::vector<VkSemaphore> m_imageAvailableSemaphores;
     std::vector<VkSemaphore> m_renderFinishedSemaphores;
     std::vector<VkFence>     m_inFlightFences;
-    uint32_t         m_currentSwapchainImage = 0;
+    uint32_t                 m_currentSwapchainImage = 0;
+    uint32_t                 m_acquireImageIdx      = 0;
 
     // --- Internal helpers ---
     void createInstance();
