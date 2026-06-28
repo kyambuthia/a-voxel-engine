@@ -1,4 +1,5 @@
 #include "vulkan_shader.h"
+#include "vulkan_types.h"
 #include <cassert>
 #include <fstream>
 #include <iostream>
@@ -29,8 +30,7 @@ VkShaderModule VulkanShader::load(VkDevice device, const std::string& filepath) 
     info.pCode    = reinterpret_cast<const uint32_t*>(code.data());
 
     VkShaderModule module;
-    VkResult result = vkCreateShaderModule(device, &info, nullptr, &module);
-    assert(result == VK_SUCCESS);
+    VK_CHECK(vkCreateShaderModule(device, &info, nullptr, &module));
 
     return module;
 }

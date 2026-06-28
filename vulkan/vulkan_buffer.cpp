@@ -50,8 +50,7 @@ void VulkanBuffer::init(VulkanContext* ctx,
     bufferInfo.usage       = usage;
     bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-    VkResult result = vkCreateBuffer(device, &bufferInfo, nullptr, &m_buffer);
-    assert(result == VK_SUCCESS);
+    VK_CHECK(vkCreateBuffer(device, &bufferInfo, nullptr, &m_buffer));
 
     VkMemoryRequirements memReq;
     vkGetBufferMemoryRequirements(device, m_buffer, &memReq);
@@ -61,8 +60,7 @@ void VulkanBuffer::init(VulkanContext* ctx,
     allocInfo.allocationSize = memReq.size;
     allocInfo.memoryTypeIndex = ctx->findMemoryType(memReq.memoryTypeBits, properties);
 
-    result = vkAllocateMemory(device, &allocInfo, nullptr, &m_memory);
-    assert(result == VK_SUCCESS);
+    VK_CHECK(vkAllocateMemory(device, &allocInfo, nullptr, &m_memory));
 
     vkBindBufferMemory(device, m_buffer, m_memory, 0);
 

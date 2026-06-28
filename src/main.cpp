@@ -251,8 +251,8 @@ int main() {
         VkCommandBufferBeginInfo beginInfo{};
         beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 
-        vkResetCommandBuffer(cmd, 0);
-        vkBeginCommandBuffer(cmd, &beginInfo);
+        VK_CHECK(vkResetCommandBuffer(cmd, 0));
+        VK_CHECK(vkBeginCommandBuffer(cmd, &beginInfo));
 
         // Render pass
         VkClearValue clearValues[2];
@@ -298,11 +298,7 @@ int main() {
 
         vkCmdEndRenderPass(cmd);
 
-        VkResult endResult = vkEndCommandBuffer(cmd);
-        if (endResult != VK_SUCCESS) {
-            std::cerr << "Failed to end command buffer.\n";
-            break;
-        }
+        VK_CHECK(vkEndCommandBuffer(cmd));
 
         // --- Submit ---
         ctx.submitFrame(cmd);

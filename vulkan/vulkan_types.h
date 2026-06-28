@@ -7,6 +7,22 @@
 #include <vector>
 #include <array>
 #include <cstdint>
+#include <cassert>
+#include <iostream>
+
+// -----------------------------------------------------------------------------
+// VK_CHECK — calls a Vulkan function, logs + asserts on failure.
+// Use as:  VK_CHECK(vkCreateInstance(...));
+// -----------------------------------------------------------------------------
+#define VK_CHECK(f)                                                       \
+    do {                                                                  \
+        VkResult _vr = (f);                                               \
+        if (_vr != VK_SUCCESS) {                                          \
+            std::cerr << "[VK_ERROR] " << #f << " returned " << _vr       \
+                      << " at " << __FILE__ << ":" << __LINE__ << "\n";   \
+            assert(false);                                                \
+        }                                                                 \
+    } while (0)
 
 // -----------------------------------------------------------------------------
 // Vertex layout

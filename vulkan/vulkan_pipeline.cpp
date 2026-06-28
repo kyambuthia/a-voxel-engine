@@ -114,8 +114,7 @@ void VulkanPipeline::init(VulkanContext* ctx, const PipelineConfig& config) {
     layoutInfo.bindingCount = 1;
     layoutInfo.pBindings    = &uboBinding;
 
-    VkResult result = vkCreateDescriptorSetLayout(device, &layoutInfo, nullptr, &m_descriptorSetLayout);
-    assert(result == VK_SUCCESS);
+    VK_CHECK(vkCreateDescriptorSetLayout(device, &layoutInfo, nullptr, &m_descriptorSetLayout));
 
     // -- Push constant for color --
     VkPushConstantRange pushConstant{};
@@ -131,8 +130,7 @@ void VulkanPipeline::init(VulkanContext* ctx, const PipelineConfig& config) {
     pipelineLayoutInfo.pushConstantRangeCount = 1;
     pipelineLayoutInfo.pPushConstantRanges    = &pushConstant;
 
-    result = vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &m_pipelineLayout);
-    assert(result == VK_SUCCESS);
+    VK_CHECK(vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &m_pipelineLayout));
 
     // -- Create graphics pipeline --
     VkGraphicsPipelineCreateInfo pipelineInfo{};
@@ -151,8 +149,7 @@ void VulkanPipeline::init(VulkanContext* ctx, const PipelineConfig& config) {
     pipelineInfo.renderPass          = ctx->renderPass();
     pipelineInfo.subpass             = 0;
 
-    result = vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &m_pipeline);
-    assert(result == VK_SUCCESS);
+    VK_CHECK(vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &m_pipeline));
 
     std::cout << "Graphics pipeline created.\n";
 
@@ -197,8 +194,7 @@ void VulkanPipeline::createDescriptorPool(uint32_t maxSets) {
     info.pPoolSizes    = &poolSize;
     info.maxSets       = maxSets;
 
-    VkResult result = vkCreateDescriptorPool(device, &info, nullptr, &m_descriptorPool);
-    assert(result == VK_SUCCESS);
+    VK_CHECK(vkCreateDescriptorPool(device, &info, nullptr, &m_descriptorPool));
 }
 
 void VulkanPipeline::createDescriptorSets(uint32_t count) {
@@ -212,6 +208,5 @@ void VulkanPipeline::createDescriptorSets(uint32_t count) {
     info.pSetLayouts        = layouts.data();
 
     m_descriptorSets.resize(count);
-    VkResult result = vkAllocateDescriptorSets(device, &info, m_descriptorSets.data());
-    assert(result == VK_SUCCESS);
+    VK_CHECK(vkAllocateDescriptorSets(device, &info, m_descriptorSets.data()));
 }

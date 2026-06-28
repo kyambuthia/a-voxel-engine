@@ -112,7 +112,7 @@ bool VulkanContext::beginFrame() {
     // from the wait above (signaled from previous render to this image)
     // or signaled from creation (first use).  Either way, resetting is
     // safe — we want it unsignaled so vkQueueSubmit can re-signal it.
-    vkResetFences(m_device, 1, &m_inFlightFences[m_currentSwapchainImage]);
+    VK_CHECK(vkResetFences(m_device, 1, &m_inFlightFences[m_currentSwapchainImage]));
 
     return true;
 }
@@ -146,9 +146,7 @@ void VulkanContext::submitFrame(VkCommandBuffer cmd) {
     submitInfo.signalSemaphoreCount = 1;
     submitInfo.pSignalSemaphores  = &m_renderFinishedSemaphores[img];
 
-    VkResult result = vkQueueSubmit(m_graphicsQueue, 1, &submitInfo,
-                                     m_inFlightFences[img]);
-    assert(result == VK_SUCCESS);
+    VK_CHECK(vkQueueSubmit(m_graphicsQueue, 1, &submitInfo, m_inFlightFences[img]));
 
     // Present only after rendering completes
     VkPresentInfoKHR presentInfo{};
@@ -159,7 +157,7 @@ void VulkanContext::submitFrame(VkCommandBuffer cmd) {
     presentInfo.pSwapchains        = &m_swapchain;
     presentInfo.pImageIndices      = &img;
 
-    result = vkQueuePresentKHR(m_presentQueue, &presentInfo);
+    VkResult result = vkQueuePresentKHR(m_presentQueue, &presentInfo);
 
     if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
         recreateSwapchain();
@@ -259,11 +257,7 @@ void VulkanContext::createInstance() {
         createInfo.pNext                = &debugCreateInfo;
     }
 
-    VkResult result = vkCreateInstance(&createInfo, nullptr, &m_instance);
-    if (result != VK_SUCCESS) {
-        std::cerr << "Failed to create Vulkan instance.\n";
-        assert(false);
-    }
+    VK_CHECK(vkCreateInstance(&createInfo, nullptr, &m_instance));
 
     std::cout << "Vulkan instance created.\n";
 }
@@ -310,8 +304,7 @@ VKAPI_ATTR VkBool32 VKAPI_CALL VulkanContext::debugCallback(
 // Surface
 // -----------------------------------------------------------------------------
 void VulkanContext::createSurface(GLFWwindow* window) {
-    VkResult result = glfwCreateWindowSurface(m_instance, window, nullptr, &m_surface);
-    assert(result == VK_SUCCESS);
+    VK_CHECK(glfwCreateWindowSurface(m_instance, window, nullptr, &m_surface));
 }
 
 // -----------------------------------------------------------------------------
@@ -466,8 +459,7 @@ void VulkanContext::createLogicalDevice() {
         createInfo.ppEnabledLayerNames = VALIDATION_LAYERS.data();
     }
 
-    VkResult result = vkCreateDevice(m_physicalDevice, &createInfo, nullptr, &m_device);
-    assert(result == VK_SUCCESS);
+    VK_CHECK(vkCreateDevice(m_physicalDevice, &createInfo, nullptr, &m_device));
 
     vkGetDeviceQueue(m_device, graphics, 0, &m_graphicsQueue);
     vkGetDeviceQueue(m_device, present, 0, &m_presentQueue);
@@ -550,8 +542,7 @@ void VulkanContext::createSwapchain() {
     info.clipped        = VK_TRUE;
     info.oldSwapchain   = VK_NULL_HANDLE;
 
-    VkResult result = vkCreateSwapchainKHR(m_device, &info, nullptr, &m_swapchain);
-    assert(result == VK_SUCCESS);
+    VK_CHECK(vkCreateSwapchainKHR(m_device, &info, nullptr, &m_swapchain));
 
     // Retrieve images
     vkGetSwapchainImagesKHR(m_device, m_swapchain, &imageCount, nullptr);
@@ -577,8 +568,7 @@ void VulkanContext::createImageViews() {
         info.subresourceRange.baseArrayLayer = 0;
         info.subresourceRange.layerCount     = 1;
 
-        VkResult result = vkCreateImageView(m_device, &info, nullptr, &m_swapchainImageViews[i]);
-        assert(result == VK_SUCCESS);
+        VK_CHECK(vkCreateImageView(m_device, &info, nullptr, &m_swapchainImageViews[i]));
     }
 }
 
@@ -604,8 +594,7 @@ void VulkanContext::createDepthResources() {
     imgInfo.sharingMode   = VK_SHARING_MODE_EXCLUSIVE;
     imgInfo.samples       = m_msaaSamples;
 
-    VkResult result = vkCreateImage(m_device, &imgInfo, nullptr, &m_depthImage);
-    assert(result == VK_SUCCESS);
+    VK_CHECK(vkCreateImage(m_device, &imgInfo, nullptr, &m_depthImage));
 
     VkMemoryRequirements memReq;
     vkGetImageMemoryRequirements(m_device, m_depthImage, &memReq);
@@ -615,8 +604,7 @@ void VulkanContext::createDepthResources() {
     allocInfo.allocationSize = memReq.size;
     allocInfo.memoryTypeIndex = findMemoryType(memReq.memoryTypeBits,
                                                 VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-    result = vkAllocateMemory(m_device, &allocInfo, nullptr, &m_depthImageMemory);
-    assert(result == VK_SUCCESS);
+    VK_CHECK(vkAllocateMemory(m_device, &allocInfo, nullptr, &m_depthImageMemory));
 
     vkBindImageMemory(m_device, m_depthImage, m_depthImageMemory, 0);
 
@@ -631,8 +619,7 @@ void VulkanContext::createDepthResources() {
     viewInfo.subresourceRange.baseArrayLayer = 0;
     viewInfo.subresourceRange.layerCount     = 1;
 
-    result = vkCreateImageView(m_device, &viewInfo, nullptr, &m_depthImageView);
-    assert(result == VK_SUCCESS);
+    VK_CHECK(vkCreateImageView(m_device, &viewInfo, nullptr, &m_depthImageView));
 }
 
 // -----------------------------------------------------------------------------
@@ -722,8 +709,7 @@ void VulkanContext::createRenderPass() {
     info.dependencyCount = 1;
     info.pDependencies   = &dep;
 
-    VkResult result = vkCreateRenderPass(m_device, &info, nullptr, &m_renderPass);
-    assert(result == VK_SUCCESS);
+    VK_CHECK(vkCreateRenderPass(m_device, &info, nullptr, &m_renderPass));
 }
 
 // -----------------------------------------------------------------------------
@@ -753,8 +739,7 @@ void VulkanContext::createFramebuffers() {
         info.height          = m_swapchainExtent.height;
         info.layers          = 1;
 
-        VkResult result = vkCreateFramebuffer(m_device, &info, nullptr, &m_swapchainFramebuffers[i]);
-        assert(result == VK_SUCCESS);
+        VK_CHECK(vkCreateFramebuffer(m_device, &info, nullptr, &m_swapchainFramebuffers[i]));
     }
 }
 
@@ -767,8 +752,7 @@ void VulkanContext::createCommandPool() {
     info.flags            = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
     info.queueFamilyIndex = m_graphicsFamily;
 
-    VkResult result = vkCreateCommandPool(m_device, &info, nullptr, &m_commandPool);
-    assert(result == VK_SUCCESS);
+    VK_CHECK(vkCreateCommandPool(m_device, &info, nullptr, &m_commandPool));
 }
 
 // -----------------------------------------------------------------------------
@@ -791,10 +775,9 @@ void VulkanContext::createSyncObjects() {
     fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
 
     for (uint32_t i = 0; i < count; ++i) {
-        VkResult r1 = vkCreateSemaphore(m_device, &semInfo, nullptr, &m_imageAvailableSemaphores[i]);
-        VkResult r2 = vkCreateSemaphore(m_device, &semInfo, nullptr, &m_renderFinishedSemaphores[i]);
-        VkResult r3 = vkCreateFence(m_device, &fenceInfo, nullptr, &m_inFlightFences[i]);
-        assert(r1 == VK_SUCCESS && r2 == VK_SUCCESS && r3 == VK_SUCCESS);
+        VK_CHECK(vkCreateSemaphore(m_device, &semInfo, nullptr, &m_imageAvailableSemaphores[i]));
+        VK_CHECK(vkCreateSemaphore(m_device, &semInfo, nullptr, &m_renderFinishedSemaphores[i]));
+        VK_CHECK(vkCreateFence(m_device, &fenceInfo, nullptr, &m_inFlightFences[i]));
     }
 }
 
