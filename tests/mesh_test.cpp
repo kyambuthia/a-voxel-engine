@@ -14,11 +14,11 @@ using namespace voxel::mesh;
 
 namespace {
 
-// Winding normal of a quad (cross product of its first three vertices).
-glm::vec3 quadWindingNormal(const ChunkMesh& mesh, std::size_t qi) {
-    const Vertex& p0 = mesh.vertices[qi * 4 + 0];
-    const Vertex& p1 = mesh.vertices[qi * 4 + 1];
-    const Vertex& p2 = mesh.vertices[qi * 4 + 2];
+// Winding normal of one emitted triangle.
+glm::vec3 triangleWindingNormal(const ChunkMesh& mesh, std::size_t ti) {
+    const Vertex& p0 = mesh.vertices[ti * 3 + 0];
+    const Vertex& p1 = mesh.vertices[ti * 3 + 1];
+    const Vertex& p2 = mesh.vertices[ti * 3 + 2];
     return glm::cross(p1.position - p0.position, p2.position - p0.position);
 }
 
@@ -40,7 +40,8 @@ TEST(mesh_single_block_six_faces) {
     ChunkMesh mesh;
     meshChunk(w, {0, 0}, mesh);
     CHECK_EQ(mesh.quadCount(), 6u);
-    CHECK_EQ(mesh.vertices.size(), 24u);
+    CHECK_EQ(mesh.triangleCount(), 12u);
+    CHECK_EQ(mesh.vertices.size(), 36u);
 }
 
 TEST(mesh_two_adjacent_blocks_share_face) {
@@ -91,22 +92,46 @@ TEST(mesh_water_block_is_meshed) {
     CHECK_EQ(mesh.quadCount(), 6u);  // water meshes against air neighbors
 }
 
+TEST(mesh_opaque_face_is_visible_through_water) {
+    World w(1);
+    w.setBlock({0, 0, 0}, BlockId::Stone);
+    w.setBlock({1, 0, 0}, BlockId::Water);
+
+    ChunkMesh mesh;
+    meshChunk(w, {0, 0}, mesh);
+
+    // The stone contributes all six faces, including its +X face at the
+    // opaque/non-opaque boundary. Water contributes its other five faces.
+    CHECK_EQ(mesh.quadCount(), 11u);
+    CHECK_EQ(mesh.triangleCount(), 22u);
+}
+
+TEST(mesh_adjacent_water_blocks_cull_shared_faces) {
+    World w(1);
+    w.setBlock({0, 0, 0}, BlockId::Water);
+    w.setBlock({1, 0, 0}, BlockId::Water);
+
+    ChunkMesh mesh;
+    meshChunk(w, {0, 0}, mesh);
+    CHECK_EQ(mesh.quadCount(), 10u);
+}
+
 TEST(mesh_winding_matches_renderer_front_face) {
     World w(1);
     w.setBlock({0, 0, 0}, BlockId::Grass);
     ChunkMesh mesh;
     meshChunk(w, {0, 0}, mesh);
     CHECK_EQ(mesh.quadCount(), 6u);
-    for (std::size_t q = 0; q < mesh.quadCount(); ++q) {
-        const glm::vec3 winding = quadWindingNormal(mesh, q);
-        const glm::vec3 faceNormal = mesh.vertices[q * 4].normal;
+    CHECK_EQ(mesh.triangleCount(), 12u);
+    for (std::size_t t = 0; t < mesh.triangleCount(); ++t) {
+        const glm::vec3 winding = triangleWindingNormal(mesh, t);
+        const glm::vec3 faceNormal = mesh.vertices[t * 3].normal;
         CHECK(glm::length(winding) > 1e-6f);
-        // The smoke-test cube renders front faces with winding normal
-        // antiparallel to the face normal; the mesher must match it so
-        // GL_CCW back-face culling keeps every outward face visible.
+        // GL_CCW keeps an outward face when its winding normal points in the
+        // same direction as the face's outward normal.
         const float dot = glm::dot(glm::normalize(winding),
                                    glm::normalize(faceNormal));
-        CHECK(dot < -0.999f);
+        CHECK(dot > 0.999f);
     }
 }
 
@@ -134,7 +159,7 @@ TEST(mesh_generated_terrain_deterministic) {
             mesher.build(*wa.chunkAt({cx, cz}), {cx, cz}, wa, ma);
             mesher.build(*wb.chunkAt({cx, cz}), {cx, cz}, wb, mb);
             CHECK_EQ(ma.vertices.size(), mb.vertices.size());
-            CHECK(ma.vertices.size() % 4 == 0);
+            CHECK(ma.vertices.size() % 6 == 0);
             CHECK(ma.vertices.size() > 0);
             totalQuads += static_cast<int>(ma.quadCount());
         }

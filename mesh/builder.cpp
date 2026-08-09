@@ -56,17 +56,32 @@ constexpr int kDir[6][3] = {
     {0, 1, 0}, {0, -1, 0}, {-1, 0, 0}, {1, 0, 0}, {0, 0, -1}, {0, 0, 1},
 };
 
-// Corner bitmasks per face, in the winding proven by the smoke-test cube (the
-// renderer's front face is GL_CCW; these orders produce cross(P1-P0, P2-P0) =
-// -faceNormal, matching that convention). Bit 0 = +x, bit 1 = +y, bit 2 = +z.
+// Corner bitmasks per face, ordered counter-clockwise when viewed from outside
+// the block. Thus cross(P1-P0, P2-P0) points along the outward face normal,
+// matching the renderer's GL_CCW front-face convention. Bit 0 = +x, bit 1 =
+// +y, bit 2 = +z.
 constexpr int kFaceCorners[6][4] = {
-    {2, 3, 7, 6},  // +Y
-    {0, 4, 5, 1},  // -Y
-    {0, 2, 6, 4},  // -X
-    {1, 5, 7, 3},  // +X
-    {0, 1, 3, 2},  // -Z
-    {4, 6, 7, 5},  // +Z
+    {2, 6, 7, 3},  // +Y
+    {0, 1, 5, 4},  // -Y
+    {0, 4, 6, 2},  // -X
+    {1, 3, 7, 5},  // +X
+    {0, 2, 3, 1},  // -Z
+    {4, 5, 7, 6},  // +Z
 };
+
+// Two independent CCW triangles from one face's four ordered corners.
+constexpr int kTriangleCorners[6] = {0, 1, 2, 0, 2, 3};
+
+bool faceIsVisible(BlockId block, BlockId neighbor) {
+    if (neighbor == BlockId::Air) {
+        return true;
+    }
+
+    // At an opaque/non-opaque boundary, emit only the opaque block's face.
+    // This keeps the solid surface visible through water without producing
+    // overlapping coplanar faces. Equal non-opaque neighbors remain culled.
+    return isOpaque(block) && !isOpaque(neighbor);
+}
 
 }  // namespace
 
@@ -87,11 +102,11 @@ void ChunkMesher::build(const Chunk& chunk, ChunkCoord coord, const World& world
                 for (int f = 0; f < 6; ++f) {
                     const BlockId neighbor = world.blockAt(
                         {wx + kDir[f][0], ly + kDir[f][1], wz + kDir[f][2]});
-                    if (neighbor != BlockId::Air) {
+                    if (!faceIsVisible(b, neighbor)) {
                         continue;  // face buried by a neighbor
                     }
                     const glm::vec3 color = faceColor(b, f);
-                    for (int c = 0; c < 4; ++c) {
+                    for (int c : kTriangleCorners) {
                         const int mask = kFaceCorners[f][c];
                         const float x = static_cast<float>(wx + (mask & 1));
                         const float y =

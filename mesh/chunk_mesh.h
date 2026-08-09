@@ -16,15 +16,18 @@ struct Vertex {
     glm::vec3 color;
 };
 
-// Output of the exposed-face mesher for one chunk. Vertices are packed 4 per
-// visible face (one quad per face, mirroring the reference architecture's
-// quad strategy); the renderer triangulates each quad into two triangles.
+// Output of the exposed-face mesher for one chunk. Vertices are packed as two
+// independent, outward-facing CCW triangles (6 vertices) per visible block
+// face, ready for a GL_TRIANGLES draw call.
 struct ChunkMesh {
     std::vector<Vertex> vertices;
 
     bool empty() const { return vertices.empty(); }
     std::uint32_t quadCount() const {
-        return static_cast<std::uint32_t>(vertices.size() / 4);
+        return static_cast<std::uint32_t>(vertices.size() / 6);
+    }
+    std::uint32_t triangleCount() const {
+        return static_cast<std::uint32_t>(vertices.size() / 3);
     }
 };
 
