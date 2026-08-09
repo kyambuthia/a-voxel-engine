@@ -40,6 +40,16 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(voxel_world PRIVATE -ffp-contract=off)
 endif()
 
+# --- Mesh layer (exposed-face mesher + chunk mesh data) ---
+add_library(voxel_mesh STATIC
+    mesh/builder.cpp
+)
+target_include_directories(voxel_mesh PUBLIC ${CMAKE_SOURCE_DIR})
+target_link_libraries(voxel_mesh PUBLIC voxel_world glm::glm)
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(voxel_mesh PRIVATE -Wall -Wextra -Wpedantic -ffp-contract=off)
+endif()
+
 # --- Sources ---
 set(SOURCES
     src/main.cpp
@@ -72,6 +82,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     SDL3::SDL3
     glm::glm
     voxel_world
+    voxel_mesh
 )
 
 if(NOT ANDROID)
@@ -90,6 +101,8 @@ if(NOT ANDROID AND CMAKE_BUILD_TYPE STREQUAL "Debug" AND CMAKE_CXX_COMPILER_ID M
     target_link_options(${PROJECT_NAME} PRIVATE -fsanitize=address -fsanitize=undefined)
     target_compile_options(voxel_world PRIVATE -fsanitize=address -fsanitize=undefined)
     target_link_options(voxel_world PRIVATE -fsanitize=address -fsanitize=undefined)
+    target_compile_options(voxel_mesh PRIVATE -fsanitize=address -fsanitize=undefined)
+    target_link_options(voxel_mesh PRIVATE -fsanitize=address -fsanitize=undefined)
     message(STATUS "Sanitizers enabled: ASAN + UBSAN")
 endif()
 
@@ -101,9 +114,10 @@ if(NOT ANDROID)
         tests/world_core_test.cpp
         tests/noise_test.cpp
         tests/generator_test.cpp
+        tests/mesh_test.cpp
     )
     target_include_directories(world_core_tests PRIVATE ${CMAKE_SOURCE_DIR})
-    target_link_libraries(world_core_tests PRIVATE voxel_world)
+    target_link_libraries(world_core_tests PRIVATE voxel_world voxel_mesh)
     if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
         target_compile_options(world_core_tests PRIVATE -Wall -Wextra -Wpedantic)
         target_compile_options(world_core_tests PRIVATE -ffp-contract=off)

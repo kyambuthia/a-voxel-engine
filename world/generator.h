@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <deque>
 #include <unordered_set>
+#include <vector>
 
 #include "world/chunk.h"
 #include "world/coords.h"
@@ -60,9 +61,14 @@ public:
 
     std::size_t pending() const { return queue_.size(); }
 
-    // Generates up to `budget` queued chunks into the world. Returns true if
-    // work remains queued.
-    bool tick(std::size_t budget = 1);
+    // Generates up to `budget` queued chunks into the world, appending each
+    // newly generated coordinate to `generated` (when non-null) so the caller
+    // can mesh/upload them. Returns true if work remains queued.
+    bool tick(std::size_t budget = 1, std::vector<ChunkCoord>* generated = nullptr);
+
+    // Height of the top solid surface at world (x, z); used to place the
+    // camera and (later) the player. See TerrainGenerator::surfaceHeight.
+    int surfaceHeight(int x, int z) const { return gen_.surfaceHeight(x, z); }
 
 private:
     TerrainGenerator gen_;

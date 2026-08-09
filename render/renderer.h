@@ -1,8 +1,12 @@
 #pragma once
 
+#include <cstdint>
 #include <memory>
 
 #include <glm/glm.hpp>
+
+#include "mesh/chunk_mesh.h"
+#include "world/coords.h"
 
 namespace voxel {
 
@@ -26,6 +30,13 @@ struct RendererCreateInfo {
 struct RenderCamera {
     glm::mat4 viewProj = glm::mat4(1.0f);
     glm::vec3 eye = glm::vec3(0.0f);
+};
+
+// Per-chunk mesh handed to the renderer for GPU upload. The renderer copies
+// the data, so the caller's buffer can be freed immediately afterwards.
+struct ChunkMeshData {
+    const voxel::mesh::Vertex* vertices = nullptr;
+    std::uint32_t vertexCount = 0;
 };
 
 // Portable renderer contract. The implementation owns the GPU context,
@@ -52,6 +63,13 @@ public:
 
     // Draw the scene. deltaSeconds drives any animation.
     virtual void renderFrame(const RenderCamera& camera, double deltaSeconds) = 0;
+
+    // Upload (or replace) the GPU mesh for a chunk. Coordinates use the
+    // world's chunk keying; a chunk with no visible faces uploads nothing.
+    virtual void uploadChunkMesh(voxel::world::ChunkCoord coord,
+                                 const ChunkMeshData& mesh) = 0;
+    // Free the GPU mesh for a chunk (no-op if not present).
+    virtual void clearChunkMesh(voxel::world::ChunkCoord coord) = 0;
 };
 
 // Factory. Returns nullptr (with a logged error) if the backend cannot be

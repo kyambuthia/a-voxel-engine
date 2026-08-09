@@ -2,15 +2,20 @@
 
 ## Current skeleton (this build)
 
-The current milestone is the rendering smoke test: a lit, spinning voxel cube
-in a pale-blue sky with an orbit camera. There is no first-person movement or
-world yet — that is the next milestone (world core + mesher).
+The current milestone renders the generated world: deterministic voxel terrain
+(grass-topped hills, stone cliffs, sand shores, water basins, caves, ores, and
+trees) streams in over a few seconds and is drawn with an orbit camera above
+the spawn area. There is no first-person movement yet — that is the next
+milestone (player controller + block interaction).
 
 | Action | PC | Android |
 | --- | --- | --- |
 | Orbit camera | Hold left mouse button + drag | Touch and drag |
 | Zoom | Mouse wheel | Pinch (future) |
 | Quit | `Esc` | Back button / swipe away |
+
+The world seed is fixed (2024) in normal runs; pass a seed as the second
+argument to explore other terrain: `a-voxel-engine [maxFrames] [seed]`.
 
 ## Planned full control scheme (world + player milestone)
 

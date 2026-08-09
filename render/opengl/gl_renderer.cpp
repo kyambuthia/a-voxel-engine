@@ -2,84 +2,28 @@
 
 #include <SDL3/SDL.h>
 
-#include <glm/gtc/constants.hpp>
-#include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 
-#include <cstddef>
 #include <cstdio>
+#include <unordered_map>
 #include <vector>
 
 #include "render/opengl/gl_shaders.h"
 #include "render/opengl/gl_utils.h"
 
 namespace voxel {
-
 namespace {
 
-// One quad per voxel face, expanded to two triangles for GL. This mirrors the
-// GX_QUADS face strategy from the engine spec: every visible face is a quad
-// with a shared normal; GL core has no quads, so we triangulate at build time.
-struct CubeVertex {
+// Interleaved GPU vertex: position + normal + RGBA color (alpha is 1; the
+// mesher supplies RGB per face). Layout matches the shader's
+// aPosition(0)/aNormal(1)/aColor(2) attributes.
+struct GpuVertex {
     float px, py, pz;
     float nx, ny, nz;
     float r, g, b, a;
 };
 
-struct CubeFace {
-    glm::vec3 normal;
-    glm::vec3 color;  // RGB, 0..1
-};
-
-constexpr CubeFace kCubeFaces[6] = {
-    {{0.0f, 1.0f, 0.0f}, {0.36f, 0.66f, 0.28f}},  // +Y grass
-    {{0.0f, -1.0f, 0.0f}, {0.45f, 0.30f, 0.18f}},  // -Y dirt
-    {{-1.0f, 0.0f, 0.0f}, {0.58f, 0.58f, 0.58f}},  // -X stone
-    {{1.0f, 0.0f, 0.0f}, {0.58f, 0.58f, 0.58f}},   // +X stone
-    {{0.0f, 0.0f, -1.0f}, {0.58f, 0.58f, 0.58f}},  // -Z stone
-    {{0.0f, 0.0f, 1.0f}, {0.58f, 0.58f, 0.58f}},   // +Z stone
-};
-
-constexpr glm::vec3 kCorners[8] = {
-    {-0.5f, -0.5f, -0.5f}, {0.5f, -0.5f, -0.5f},
-    {0.5f, 0.5f, -0.5f},   {-0.5f, 0.5f, -0.5f},
-    {-0.5f, -0.5f, 0.5f},  {0.5f, -0.5f, 0.5f},
-    {0.5f, 0.5f, 0.5f},    {-0.5f, 0.5f, 0.5f},
-};
-
-// Face -> corner indices, CCW when viewed from the outward side.
-constexpr int kFaceCorners[6][4] = {
-    {3, 2, 6, 7},  // +Y
-    {0, 4, 5, 1},  // -Y
-    {0, 3, 7, 4},  // -X
-    {1, 5, 6, 2},  // +X
-    {0, 1, 2, 3},  // -Z
-    {4, 7, 6, 5},  // +Z
-};
-
-void buildCube(std::vector<CubeVertex>& verts,
-               std::vector<unsigned int>& indices) {
-    verts.clear();
-    indices.clear();
-    for (int f = 0; f < 6; ++f) {
-        const CubeFace& face = kCubeFaces[f];
-        const int base = static_cast<int>(verts.size());
-        for (int c = 0; c < 4; ++c) {
-            const glm::vec3& p = kCorners[kFaceCorners[f][c]];
-            verts.push_back(CubeVertex{p.x, p.y, p.z,
-                                       face.normal.x, face.normal.y,
-                                       face.normal.z,
-                                       face.color.r, face.color.g, face.color.b,
-                                       1.0f});
-        }
-        indices.push_back(static_cast<unsigned int>(base + 0));
-        indices.push_back(static_cast<unsigned int>(base + 1));
-        indices.push_back(static_cast<unsigned int>(base + 2));
-        indices.push_back(static_cast<unsigned int>(base + 0));
-        indices.push_back(static_cast<unsigned int>(base + 2));
-        indices.push_back(static_cast<unsigned int>(base + 3));
-    }
-}
+constexpr int kFloatsPerVertex = 10;
 
 }  // namespace
 
@@ -94,15 +38,17 @@ struct GL_Renderer::Impl {
 
     // GPU resources (rebuilt from scratch in createResources()).
     GLuint program = 0;
-    GLuint vao = 0;
-    GLuint vbo = 0;
-    GLuint ebo = 0;
     GLint uModel = -1;
     GLint uViewProj = -1;
     GLint uLightDir = -1;
-    std::size_t indexCount = 0;
 
-    float spin = 0.0f;
+    // Per-chunk geometry keyed by the world's chunk key.
+    struct GpuMesh {
+        GLuint vao = 0;
+        GLuint vbo = 0;
+        GLsizei vertexCount = 0;
+    };
+    std::unordered_map<std::uint64_t, GpuMesh> chunkMeshes;
 };
 
 GL_Renderer::GL_Renderer(const RendererCreateInfo& info)
@@ -205,57 +151,20 @@ bool GL_Renderer::createResources() {
     m.uModel = gl::glGetUniformLocation(m.program, "uModel");
     m.uViewProj = gl::glGetUniformLocation(m.program, "uViewProj");
     m.uLightDir = gl::glGetUniformLocation(m.program, "uLightDir");
-
-    std::vector<CubeVertex> verts;
-    std::vector<unsigned int> indices;
-    buildCube(verts, indices);
-    m.indexCount = indices.size();
-
-    gl::glGenVertexArrays(1, &m.vao);
-    gl::glBindVertexArray(m.vao);
-
-    gl::glGenBuffers(1, &m.vbo);
-    gl::glBindBuffer(GL_ARRAY_BUFFER, m.vbo);
-    gl::glBufferData(GL_ARRAY_BUFFER,
-                     static_cast<GLsizeiptr>(verts.size() * sizeof(CubeVertex)),
-                     verts.data(), GL_STATIC_DRAW);
-
-    gl::glGenBuffers(1, &m.ebo);
-    gl::glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m.ebo);
-    gl::glBufferData(
-        GL_ELEMENT_ARRAY_BUFFER,
-        static_cast<GLsizeiptr>(indices.size() * sizeof(unsigned int)),
-        indices.data(), GL_STATIC_DRAW);
-
-    const GLsizei stride = static_cast<GLsizei>(sizeof(CubeVertex));
-    gl::glEnableVertexAttribArray(0);
-    gl::glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, stride,
-                              reinterpret_cast<const void*>(offsetof(CubeVertex, px)));
-    gl::glEnableVertexAttribArray(1);
-    gl::glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, stride,
-                              reinterpret_cast<const void*>(offsetof(CubeVertex, nx)));
-    gl::glEnableVertexAttribArray(2);
-    gl::glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, stride,
-                              reinterpret_cast<const void*>(offsetof(CubeVertex, r)));
-
-    gl::glBindVertexArray(0);
     return gl::checkError("createResources");
 }
 
 void GL_Renderer::destroyResources() {
     Impl& m = *m_impl;
-    if (m.vao != 0) {
-        gl::glDeleteVertexArrays(1, &m.vao);
-        m.vao = 0;
+    for (auto& kv : m.chunkMeshes) {
+        if (kv.second.vao != 0) {
+            gl::glDeleteVertexArrays(1, &kv.second.vao);
+        }
+        if (kv.second.vbo != 0) {
+            gl::glDeleteBuffers(1, &kv.second.vbo);
+        }
     }
-    if (m.vbo != 0) {
-        gl::glDeleteBuffers(1, &m.vbo);
-        m.vbo = 0;
-    }
-    if (m.ebo != 0) {
-        gl::glDeleteBuffers(1, &m.ebo);
-        m.ebo = 0;
-    }
+    m.chunkMeshes.clear();
     if (m.program != 0) {
         gl::glDeleteProgram(m.program);
         m.program = 0;
@@ -295,7 +204,7 @@ void GL_Renderer::onResume() {
         return;
     }
     // Android destroys GL state across surface recreation; rebuild everything.
-    // On desktop this path is harmless (delete + re-upload the tiny demo mesh).
+    // On desktop this path is harmless (delete + re-upload chunk meshes).
     if (!SDL_GL_MakeCurrent(m.window, m.context)) {
         std::fprintf(stderr, "[GL] onResume: SDL_GL_MakeCurrent failed: %s\n",
                      SDL_GetError());
@@ -315,28 +224,93 @@ void GL_Renderer::onResume() {
     m.ready = true;
 }
 
-void GL_Renderer::renderFrame(const RenderCamera& camera,
-                              double deltaSeconds) {
+void GL_Renderer::uploadChunkMesh(voxel::world::ChunkCoord coord,
+                                  const ChunkMeshData& data) {
+    Impl& m = *m_impl;
+    if (!m.ready || data.vertexCount == 0 || data.vertices == nullptr) {
+        return;
+    }
+
+    std::vector<float> buffer;
+    buffer.reserve(static_cast<std::size_t>(data.vertexCount) *
+                   kFloatsPerVertex);
+    for (std::uint32_t i = 0; i < data.vertexCount; ++i) {
+        const voxel::mesh::Vertex& v = data.vertices[i];
+        buffer.insert(buffer.end(),
+                      {v.position.x, v.position.y, v.position.z,
+                       v.normal.x, v.normal.y, v.normal.z,
+                       v.color.r, v.color.g, v.color.b, 1.0f});
+    }
+
+    const std::uint64_t key = chunkKey(coord);
+    auto it = m.chunkMeshes.find(key);
+    if (it != m.chunkMeshes.end()) {
+        gl::glDeleteVertexArrays(1, &it->second.vao);
+        gl::glDeleteBuffers(1, &it->second.vbo);
+    }
+
+    Impl::GpuMesh gpu;
+    gl::glGenVertexArrays(1, &gpu.vao);
+    gl::glBindVertexArray(gpu.vao);
+    gl::glGenBuffers(1, &gpu.vbo);
+    gl::glBindBuffer(GL_ARRAY_BUFFER, gpu.vbo);
+    gl::glBufferData(GL_ARRAY_BUFFER,
+                     static_cast<GLsizeiptr>(buffer.size() * sizeof(float)),
+                     buffer.data(), GL_STATIC_DRAW);
+
+    const GLsizei stride = kFloatsPerVertex * static_cast<GLsizei>(sizeof(float));
+    gl::glEnableVertexAttribArray(0);
+    gl::glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, stride,
+                              reinterpret_cast<const void*>(0));
+    gl::glEnableVertexAttribArray(1);
+    gl::glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, stride,
+                              reinterpret_cast<const void*>(3 * sizeof(float)));
+    gl::glEnableVertexAttribArray(2);
+    gl::glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, stride,
+                              reinterpret_cast<const void*>(6 * sizeof(float)));
+    gl::glBindVertexArray(0);
+
+    gpu.vertexCount = static_cast<GLsizei>(data.vertexCount);
+    m.chunkMeshes[key] = gpu;
+}
+
+void GL_Renderer::clearChunkMesh(voxel::world::ChunkCoord coord) {
+    Impl& m = *m_impl;
+    const std::uint64_t key = chunkKey(coord);
+    auto it = m.chunkMeshes.find(key);
+    if (it == m.chunkMeshes.end()) {
+        return;
+    }
+    if (it->second.vao != 0) {
+        gl::glDeleteVertexArrays(1, &it->second.vao);
+    }
+    if (it->second.vbo != 0) {
+        gl::glDeleteBuffers(1, &it->second.vbo);
+    }
+    m.chunkMeshes.erase(it);
+}
+
+void GL_Renderer::renderFrame(const RenderCamera& camera, double /*delta*/) {
     Impl& m = *m_impl;
     if (!m.ready || m.program == 0) {
         return;
     }
 
-    m.spin += static_cast<float>(deltaSeconds * 0.6);
-    glm::mat4 model =
-        glm::rotate(glm::mat4(1.0f), m.spin, glm::vec3(0.0f, 1.0f, 0.0f));
-
     gl::glUseProgram(m.program);
-    gl::glBindVertexArray(m.vao);
-    gl::glUniformMatrix4fv(m.uModel, 1, GL_FALSE, glm::value_ptr(model));
     gl::glUniformMatrix4fv(m.uViewProj, 1, GL_FALSE,
                            glm::value_ptr(camera.viewProj));
+    // Chunk vertices are already in world space.
+    const glm::mat4 identity(1.0f);
+    gl::glUniformMatrix4fv(m.uModel, 1, GL_FALSE, glm::value_ptr(identity));
 
     const glm::vec3 lightDir = glm::normalize(glm::vec3(-0.6f, 0.8f, 0.35f));
     gl::glUniform3f(m.uLightDir, lightDir.x, lightDir.y, lightDir.z);
 
-    gl::glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(m.indexCount),
-                       GL_UNSIGNED_INT, nullptr);
+    for (const auto& kv : m.chunkMeshes) {
+        const Impl::GpuMesh& gpu = kv.second;
+        gl::glBindVertexArray(gpu.vao);
+        gl::glDrawArrays(GL_TRIANGLES, 0, gpu.vertexCount);
+    }
 
     gl::glBindVertexArray(0);
     gl::glUseProgram(0);

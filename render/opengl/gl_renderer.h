@@ -23,6 +23,9 @@ public:
     void onResume() override;
 
     void renderFrame(const RenderCamera& camera, double deltaSeconds) override;
+    void uploadChunkMesh(voxel::world::ChunkCoord coord,
+                         const ChunkMeshData& mesh) override;
+    void clearChunkMesh(voxel::world::ChunkCoord coord) override;
 
 private:
     bool createResources();

@@ -201,7 +201,8 @@ bool WorldGenerator::request(ChunkCoord c) {
     return true;
 }
 
-bool WorldGenerator::tick(std::size_t budget) {
+bool WorldGenerator::tick(std::size_t budget,
+                          std::vector<ChunkCoord>* generated) {
     std::size_t done = 0;
     while (!queue_.empty() && done < budget) {
         const ChunkCoord c = queue_.front();
@@ -209,6 +210,9 @@ bool WorldGenerator::tick(std::size_t budget) {
         queued_.erase(chunkKey(c));
         Chunk* chunk = world_.loadChunk(c);
         gen_.generate(*chunk, c);
+        if (generated != nullptr) {
+            generated->push_back(c);
+        }
         ++done;
     }
     return !queue_.empty();

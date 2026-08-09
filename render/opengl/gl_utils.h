@@ -71,6 +71,7 @@ namespace voxel::gl {
                                     const void*))                                \
     X(glEnableVertexAttribArray, void, (GLuint))                                 \
     X(glDisableVertexAttribArray, void, (GLuint))                                \
+    X(glDrawArrays, void, (GLenum, GLint, GLsizei))                              \
     X(glDrawElements, void, (GLenum, GLsizei, GLenum, const void*))
 
 #define VOXEL_GL_DECL(name, ret, params) extern ret(APIENTRY * name) params;
