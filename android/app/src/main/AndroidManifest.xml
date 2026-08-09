@@ -4,8 +4,8 @@
     android:versionName="1.0"
     android:installLocation="auto">
 
-    <!-- Vulkan renderer (no OpenGL dependency) -->
-    <uses-feature android:name="android.hardware.vulkan.version" android:required="true" android:version="0x00400001" />
+    <!-- OpenGL ES 3.0 renderer (portable OpenGL backend) -->
+    <uses-feature android:glEsVersion="0x00030000" android:required="true" />
 
     <!-- Touchscreen support -->
     <uses-feature
