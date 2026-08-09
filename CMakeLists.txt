@@ -115,6 +115,7 @@ if(NOT ANDROID)
         tests/noise_test.cpp
         tests/generator_test.cpp
         tests/mesh_test.cpp
+        tests/fly_camera_test.cpp
     )
     target_include_directories(world_core_tests PRIVATE ${CMAKE_SOURCE_DIR})
     target_link_libraries(world_core_tests PRIVATE voxel_world voxel_mesh)

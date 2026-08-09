@@ -2,16 +2,20 @@
 
 ## Current skeleton (this build)
 
-The current milestone renders the generated world: deterministic voxel terrain
-(grass-topped hills, stone cliffs, sand shores, water basins, caves, ores, and
-trees) streams in over a few seconds and is drawn with an orbit camera above
-the spawn area. There is no first-person movement yet — that is the next
-milestone (player controller + block interaction).
+The current milestone renders the generated world with a free-fly camera:
+deterministic voxel terrain (grass-topped hills, stone cliffs, sand shores,
+water basins, caves, ores, and trees) streams in around you as you move.
+Movement is a fly-mode (no gravity, per-axis collision keeps you out of solid
+blocks); chunk generation and meshing follow the camera.
 
 | Action | PC | Android |
 | --- | --- | --- |
-| Orbit camera | Hold left mouse button + drag | Touch and drag |
-| Zoom | Mouse wheel | Pinch (future) |
+| Look | Move mouse (locked) | Touch and drag |
+| Fly forward / back | `W` / `S` | (virtual joystick, future) |
+| Strafe left / right | `A` / `D` | (virtual joystick, future) |
+| Ascend / descend | `Space` / `C` | (future) |
+| Boost | Left `Shift` | (future) |
+| Adjust speed | Mouse wheel | Pinch (future) |
 | Quit | `Esc` | Back button / swipe away |
 
 The world seed is fixed (2024) in normal runs; pass a seed as the second
