@@ -30,6 +30,7 @@ endif()
 add_library(voxel_world STATIC
     world/world.cpp
     world/noise.cpp
+    world/generator.cpp
 )
 target_include_directories(voxel_world PUBLIC ${CMAKE_SOURCE_DIR})
 # Float-contract control: fuse-free math keeps noise results bit-identical
@@ -99,6 +100,7 @@ if(NOT ANDROID)
         tests/test_main.cpp
         tests/world_core_test.cpp
         tests/noise_test.cpp
+        tests/generator_test.cpp
     )
     target_include_directories(world_core_tests PRIVATE ${CMAKE_SOURCE_DIR})
     target_link_libraries(world_core_tests PRIVATE voxel_world)

@@ -4,20 +4,13 @@
 
 namespace voxel::world {
 
-namespace {
-inline std::uint64_t packChunkKey(ChunkCoord c) {
-    return (static_cast<std::uint64_t>(static_cast<std::uint32_t>(c.cx)) << 32) |
-           static_cast<std::uint32_t>(c.cz);
-}
-}  // namespace
-
 void World::reset(std::uint32_t seed) {
     seed_ = seed;
     chunks_.clear();
 }
 
 Chunk* World::loadChunk(ChunkCoord c) {
-    const std::uint64_t key = packChunkKey(c);
+    const std::uint64_t key = chunkKey(c);
     auto it = chunks_.find(key);
     if (it == chunks_.end()) {
         auto emplaced = chunks_.emplace(key, Chunk(c));
@@ -26,15 +19,15 @@ Chunk* World::loadChunk(ChunkCoord c) {
     return &it->second;
 }
 
-void World::unloadChunk(ChunkCoord c) { chunks_.erase(packChunkKey(c)); }
+void World::unloadChunk(ChunkCoord c) { chunks_.erase(chunkKey(c)); }
 
 Chunk* World::chunkAt(ChunkCoord c) {
-    auto it = chunks_.find(packChunkKey(c));
+    auto it = chunks_.find(chunkKey(c));
     return it == chunks_.end() ? nullptr : &it->second;
 }
 
 const Chunk* World::chunkAt(ChunkCoord c) const {
-    auto it = chunks_.find(packChunkKey(c));
+    auto it = chunks_.find(chunkKey(c));
     return it == chunks_.end() ? nullptr : &it->second;
 }
 

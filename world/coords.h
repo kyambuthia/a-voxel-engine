@@ -93,4 +93,11 @@ inline constexpr LocalCoord localFromIndex(int i) {
     return LocalCoord{x, y, z};
 }
 
+// Opaque unique key for a chunk coordinate (cx, cz packed into 64 bits). Used
+// as the hash key for chunk storage and generation queues.
+inline std::uint64_t chunkKey(ChunkCoord c) {
+    return (static_cast<std::uint64_t>(static_cast<std::uint32_t>(c.cx)) << 32) |
+           static_cast<std::uint32_t>(c.cz);
+}
+
 }  // namespace voxel::world
