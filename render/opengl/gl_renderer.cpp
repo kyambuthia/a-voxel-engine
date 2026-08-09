@@ -4,7 +4,11 @@
 
 #include <glm/gtc/type_ptr.hpp>
 
+#include <algorithm>
+#include <array>
 #include <cstdio>
+#include <cstdint>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -24,6 +28,44 @@ struct GpuVertex {
 };
 
 constexpr int kFloatsPerVertex = 10;
+
+// OpenGL's clip volume is -w..+w on all three axes. Extracting the six
+// homogeneous clip planes from the combined view/projection matrix lets us
+// reject whole chunk columns before issuing a draw call. Planes do not need
+// normalization for this AABB test.
+struct Frustum {
+    std::array<glm::vec4, 6> planes;
+
+    bool intersects(const glm::vec3& boundsMin,
+                    const glm::vec3& boundsMax) const {
+        for (const glm::vec4& plane : planes) {
+            const glm::vec3 positive{
+                plane.x >= 0.0f ? boundsMax.x : boundsMin.x,
+                plane.y >= 0.0f ? boundsMax.y : boundsMin.y,
+                plane.z >= 0.0f ? boundsMax.z : boundsMin.z,
+            };
+            if (glm::dot(glm::vec3(plane), positive) + plane.w < 0.0f) {
+                return false;
+            }
+        }
+        return true;
+    }
+};
+
+Frustum extractFrustum(const glm::mat4& viewProj) {
+    // GLM matrices are column-major; construct the matrix rows explicitly.
+    const glm::vec4 row0{viewProj[0][0], viewProj[1][0], viewProj[2][0],
+                         viewProj[3][0]};
+    const glm::vec4 row1{viewProj[0][1], viewProj[1][1], viewProj[2][1],
+                         viewProj[3][1]};
+    const glm::vec4 row2{viewProj[0][2], viewProj[1][2], viewProj[2][2],
+                         viewProj[3][2]};
+    const glm::vec4 row3{viewProj[0][3], viewProj[1][3], viewProj[2][3],
+                         viewProj[3][3]};
+
+    return Frustum{{row3 + row0, row3 - row0, row3 + row1, row3 - row1,
+                    row3 + row2, row3 - row2}};
+}
 
 }  // namespace
 
@@ -47,8 +89,14 @@ struct GL_Renderer::Impl {
         GLuint vao = 0;
         GLuint vbo = 0;
         GLsizei vertexCount = 0;
+        glm::vec3 boundsMin{0.0f};
+        glm::vec3 boundsMax{0.0f};
     };
     std::unordered_map<std::uint64_t, GpuMesh> chunkMeshes;
+
+    // Reused between captures; resize only reallocates after a framebuffer
+    // size increase instead of allocating two full-frame buffers per image.
+    std::vector<std::uint8_t> screenshotPixels;
 };
 
 GL_Renderer::GL_Renderer(const RendererCreateInfo& info)
@@ -227,7 +275,16 @@ void GL_Renderer::onResume() {
 void GL_Renderer::uploadChunkMesh(voxel::world::ChunkCoord coord,
                                   const ChunkMeshData& data) {
     Impl& m = *m_impl;
-    if (!m.ready || data.vertexCount == 0 || data.vertices == nullptr) {
+    if (!m.ready) {
+        return;
+    }
+    if (data.vertexCount == 0) {
+        clearChunkMesh(coord);
+        return;
+    }
+    if (data.vertices == nullptr) {
+        std::fprintf(stderr,
+                     "[GL] rejected chunk mesh with a null vertex buffer\n");
         return;
     }
 
@@ -271,6 +328,15 @@ void GL_Renderer::uploadChunkMesh(voxel::world::ChunkCoord coord,
     gl::glBindVertexArray(0);
 
     gpu.vertexCount = static_cast<GLsizei>(data.vertexCount);
+    const float minX = static_cast<float>(coord.cx) *
+                       static_cast<float>(voxel::world::kChunkSizeX);
+    const float minZ = static_cast<float>(coord.cz) *
+                       static_cast<float>(voxel::world::kChunkSizeZ);
+    gpu.boundsMin = glm::vec3(minX, 0.0f, minZ);
+    gpu.boundsMax =
+        glm::vec3(minX + static_cast<float>(voxel::world::kChunkSizeX),
+                  static_cast<float>(voxel::world::kChunkHeight),
+                  minZ + static_cast<float>(voxel::world::kChunkSizeZ));
     m.chunkMeshes[key] = gpu;
 }
 
@@ -306,14 +372,77 @@ void GL_Renderer::renderFrame(const RenderCamera& camera, double /*delta*/) {
     const glm::vec3 lightDir = glm::normalize(glm::vec3(-0.6f, 0.8f, 0.35f));
     gl::glUniform3f(m.uLightDir, lightDir.x, lightDir.y, lightDir.z);
 
+    const Frustum frustum = extractFrustum(camera.viewProj);
     for (const auto& kv : m.chunkMeshes) {
         const Impl::GpuMesh& gpu = kv.second;
+        if (!frustum.intersects(gpu.boundsMin, gpu.boundsMax)) {
+            continue;
+        }
         gl::glBindVertexArray(gpu.vao);
         gl::glDrawArrays(GL_TRIANGLES, 0, gpu.vertexCount);
     }
 
     gl::glBindVertexArray(0);
     gl::glUseProgram(0);
+}
+
+bool GL_Renderer::captureScreenshot(const std::string& path) {
+    Impl& m = *m_impl;
+    if (!m.ready || m.width <= 0 || m.height <= 0) {
+        std::fprintf(stderr, "[GL] screenshot unavailable: renderer is not ready\n");
+        return false;
+    }
+    if (path.empty()) {
+        std::fprintf(stderr, "[GL] screenshot path is empty\n");
+        return false;
+    }
+
+    const std::size_t rowBytes = static_cast<std::size_t>(m.width) * 4u;
+    const std::size_t byteCount = rowBytes * static_cast<std::size_t>(m.height);
+    m.screenshotPixels.resize(byteCount);
+
+    // GL's first returned row is the bottom of the framebuffer, whereas PNG
+    // conventionally stores the top row first. RGBA/UNSIGNED_BYTE is present
+    // in both OpenGL 3.3 and OpenGL ES 3.0. Preserve the caller's pack state.
+    GLint previousPackAlignment = 4;
+    gl::glGetIntegerv(GL_PACK_ALIGNMENT, &previousPackAlignment);
+    gl::glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    gl::glReadPixels(0, 0, m.width, m.height, GL_RGBA, GL_UNSIGNED_BYTE,
+                     m.screenshotPixels.data());
+    gl::glPixelStorei(GL_PACK_ALIGNMENT, previousPackAlignment);
+    if (!gl::checkError("captureScreenshot glReadPixels")) {
+        return false;
+    }
+    for (int y = 0; y < m.height / 2; ++y) {
+        auto top = m.screenshotPixels.begin() +
+                   static_cast<std::ptrdiff_t>(static_cast<std::size_t>(y) *
+                                               rowBytes);
+        auto bottom = m.screenshotPixels.begin() + static_cast<std::ptrdiff_t>(
+            static_cast<std::size_t>(m.height - 1 - y) * rowBytes);
+        std::swap_ranges(top,
+                         top + static_cast<std::ptrdiff_t>(rowBytes), bottom);
+    }
+
+    // SDL_PIXELFORMAT_RGBA32 denotes RGBA byte order in memory on both
+    // little- and big-endian targets, matching GL_RGBA readback.
+    SDL_Surface* surface = SDL_CreateSurfaceFrom(
+        m.width, m.height, SDL_PIXELFORMAT_RGBA32, m.screenshotPixels.data(),
+        static_cast<int>(rowBytes));
+    if (surface == nullptr) {
+        std::fprintf(stderr, "[GL] screenshot surface creation failed: %s\n",
+                     SDL_GetError());
+        return false;
+    }
+    const bool saved = SDL_SavePNG(surface, path.c_str());
+    SDL_DestroySurface(surface);
+    if (!saved) {
+        std::fprintf(stderr, "[GL] screenshot save failed for '%s': %s\n",
+                     path.c_str(), SDL_GetError());
+        return false;
+    }
+    std::printf("[GL] screenshot saved: %s (%dx%d)\n", path.c_str(), m.width,
+                m.height);
+    return true;
 }
 
 }  // namespace voxel

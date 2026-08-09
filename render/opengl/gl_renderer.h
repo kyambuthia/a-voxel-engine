@@ -23,6 +23,7 @@ public:
     void onResume() override;
 
     void renderFrame(const RenderCamera& camera, double deltaSeconds) override;
+    bool captureScreenshot(const std::string& path) override;
     void uploadChunkMesh(voxel::world::ChunkCoord coord,
                          const ChunkMeshData& mesh) override;
     void clearChunkMesh(voxel::world::ChunkCoord coord) override;

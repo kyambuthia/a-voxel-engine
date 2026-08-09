@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <string>
 
 #include <glm/glm.hpp>
 
@@ -64,8 +65,15 @@ public:
     // Draw the scene. deltaSeconds drives any animation.
     virtual void renderFrame(const RenderCamera& camera, double deltaSeconds) = 0;
 
+    // Save the fully rendered back buffer as a PNG. This must be called after
+    // renderFrame() and before endFrame(), while the context is current.
+    // Returns false and logs a diagnostic when capture is unavailable or the
+    // output cannot be written.
+    virtual bool captureScreenshot(const std::string& path) = 0;
+
     // Upload (or replace) the GPU mesh for a chunk. Coordinates use the
-    // world's chunk keying; a chunk with no visible faces uploads nothing.
+    // world's chunk keying. A zero vertex count removes any prior geometry
+    // for that chunk so remeshing to empty cannot leave a stale draw behind.
     virtual void uploadChunkMesh(voxel::world::ChunkCoord coord,
                                  const ChunkMeshData& mesh) = 0;
     // Free the GPU mesh for a chunk (no-op if not present).

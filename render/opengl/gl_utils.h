@@ -39,7 +39,11 @@ namespace voxel::gl {
     X(glDisable, void, (GLenum))                                                 \
     X(glViewport, void, (GLint, GLint, GLsizei, GLsizei))                        \
     X(glGetError, GLenum, ())                                                    \
+    X(glGetIntegerv, void, (GLenum, GLint*))                                    \
     X(glGetString, const GLubyte*, (GLenum))                                     \
+    X(glPixelStorei, void, (GLenum, GLint))                                      \
+    X(glReadPixels, void, (GLint, GLint, GLsizei, GLsizei, GLenum, GLenum,       \
+                          void*))                                                 \
     X(glDepthFunc, void, (GLenum))                                               \
     X(glCullFace, void, (GLenum))                                                \
     X(glFrontFace, void, (GLenum))                                               \
