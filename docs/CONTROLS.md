@@ -14,12 +14,16 @@ blocks); chunk generation and meshing follow the camera.
 | Fly forward / back | `W` / `S` | (virtual joystick, future) |
 | Strafe left / right | `A` / `D` | (virtual joystick, future) |
 | Ascend / descend | `Space` / `C` | (future) |
-| Boost | Left `Shift` | (future) |
-| Adjust speed | Mouse wheel | Pinch (future) |
+| Boost (×4) | `Shift` (either) | (future) |
+| Adjust speed | Mouse wheel (up = faster) | Pinch (future) |
+| Reset speed | `R` | (future) |
 | Quit | `Esc` | Back button / swipe away |
 
-The world seed is fixed (2024) in normal runs; pass a seed as the second
-argument to explore other terrain: `a-voxel-engine [maxFrames] [seed]`.
+Speed ranges from 2 to 200 blocks/s (base 16; `Shift` multiplies by 4; the
+mouse wheel scales it by 1.5× per notch; `R` resets to the base). The current
+speed is shown in the window title. The world seed is fixed (2024) in normal
+runs; pass a seed as the second argument to explore other terrain:
+`a-voxel-engine [maxFrames] [seed]`.
 
 ## Planned full control scheme (world + player milestone)
 

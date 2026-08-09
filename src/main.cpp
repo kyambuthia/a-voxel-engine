@@ -37,7 +37,11 @@ bool gSuspended = false;  // minimized / (Android) backgrounded
 voxel::game::FlyCamera gCam;
 bool gMouseCaptured = false;  // desktop relative-mouse look
 bool gDragging = false;       // Android / fallback drag look
-float gFlySpeed = 10.0f;      // blocks/second (mouse wheel adjusts)
+float gFlySpeed = 16.0f;      // blocks/second (mouse wheel adjusts)
+
+constexpr float kMinFlySpeed = 2.0f;
+constexpr float kMaxFlySpeed = 200.0f;
+constexpr float kDefaultFlySpeed = 16.0f;
 
 struct Keys {
     bool w = false, a = false, s = false, d = false;
@@ -58,6 +62,14 @@ void applyLook(float xrel, float yrel) {
     gCam.yaw += xrel * 0.0025f;
     gCam.pitch -= yrel * 0.0025f;  // mouse up -> look up
     gCam.pitch = std::clamp(gCam.pitch, -1.5f, 1.5f);
+}
+
+void refreshTitle(SDL_Window* window) {
+    char title[128];
+    std::snprintf(title, sizeof(title),
+                  "a-voxel-engine  |  speed %3.0f blk/s  (Shift x4  |  wheel  |  R reset)",
+                  gFlySpeed);
+    SDL_SetWindowTitle(window, title);
 }
 
 // Pack the mesher output into the renderer's upload format.
@@ -166,6 +178,7 @@ int main(int argc, char* argv[]) {
     gCam.position = glm::vec3(0.0f, spawnY + 6.0f, -12.0f);
     gCam.yaw = 0.0f;
     gCam.pitch = -0.15f;
+    refreshTitle(window);
 
 #if !defined(__ANDROID__)
     gMouseCaptured = SDL_SetWindowRelativeMouseMode(window, true);
@@ -207,7 +220,12 @@ int main(int argc, char* argv[]) {
                             gKeys.c = true;
                             break;
                         case SDLK_LSHIFT:
+                        case SDLK_RSHIFT:
                             gKeys.shift = true;
+                            break;
+                        case SDLK_R:
+                            gFlySpeed = kDefaultFlySpeed;
+                            refreshTitle(window);
                             break;
                         default:
                             break;
@@ -234,6 +252,7 @@ int main(int argc, char* argv[]) {
                             gKeys.c = false;
                             break;
                         case SDLK_LSHIFT:
+                        case SDLK_RSHIFT:
                             gKeys.shift = false;
                             break;
                         default:
@@ -257,8 +276,10 @@ int main(int argc, char* argv[]) {
                     }
                     break;
                 case SDL_EVENT_MOUSE_WHEEL:
-                    gFlySpeed *= (event.wheel.y > 0.0f) ? 1.25f : 0.8f;
-                    gFlySpeed = std::clamp(gFlySpeed, 1.0f, 100.0f);
+                    gFlySpeed *= (event.wheel.y > 0.0f) ? 1.5f : 0.667f;
+                    gFlySpeed =
+                        std::clamp(gFlySpeed, kMinFlySpeed, kMaxFlySpeed);
+                    refreshTitle(window);
                     break;
 
                 case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
@@ -343,8 +364,18 @@ int main(int argc, char* argv[]) {
             return false;
         };
         const auto moveAxis = [&](float dx, float dy, float dz) {
-            const glm::vec3 next = gCam.position + glm::vec3(dx, dy, dz);
-            if (!isBlocked(next)) {
+            // Substep so fast flight cannot tunnel through thin geometry.
+            const glm::vec3 delta(dx, dy, dz);
+            const float extent =
+                std::max(std::abs(dx), std::max(std::abs(dy), std::abs(dz)));
+            const int steps =
+                std::max(1, static_cast<int>(std::ceil(extent / 0.5f)));
+            const glm::vec3 step = delta / static_cast<float>(steps);
+            for (int i = 0; i < steps; ++i) {
+                const glm::vec3 next = gCam.position + step;
+                if (isBlocked(next)) {
+                    return;
+                }
                 gCam.position = next;
             }
         };
@@ -366,7 +397,7 @@ int main(int argc, char* argv[]) {
             }
         }
         std::vector<voxel::world::ChunkCoord> generated;
-        generator.tick(2, &generated);
+        generator.tick(4, &generated);
         for (const voxel::world::ChunkCoord c : generated) {
             if (meshed.count(chunkKey(c)) != 0) {
                 continue;
