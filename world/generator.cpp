@@ -1,6 +1,7 @@
 #include "world/generator.h"
 
 #include <algorithm>
+#include <stdexcept>
 
 namespace voxel::world {
 namespace {
@@ -21,6 +22,27 @@ constexpr std::uint32_t kOreGateSalt = 0xa98b4f5du;
 constexpr std::uint32_t kOreDepthSalt = 0x44bb7343u;
 constexpr std::uint32_t kOreKindSalt = 0x9d6fbf21u;
 constexpr std::uint32_t kTreeSalt = 0xcb9d1b91u;
+constexpr float kTreeDensity = 0.0075f;
+constexpr Coord kSpawnTreeClearRadius = 4;
+
+BlockId blockAt(const Chunk::BlockStorage& blocks, LocalCoord c) {
+    return inChunkBounds(c) ? blocks[blockIndex(c)] : BlockId::Air;
+}
+
+void setBlock(Chunk::BlockStorage& blocks, LocalCoord c, BlockId block) {
+    if (inChunkBounds(c)) {
+        blocks[blockIndex(c)] = block;
+    }
+}
+
+std::uint64_t axisDistance(Coord a, Coord b) {
+    const std::int64_t delta = static_cast<std::int64_t>(a) - b;
+    return static_cast<std::uint64_t>(delta < 0 ? -delta : delta);
+}
+
+std::uint64_t priorityDistance(ChunkCoord a, ChunkCoord b) {
+    return axisDistance(a.cx, b.cx) + axisDistance(a.cz, b.cz);
+}
 
 }  // namespace
 
@@ -46,6 +68,7 @@ float TerrainGenerator::moisture01(int x, int z) const {
 }
 
 void TerrainGenerator::generate(Chunk& out, ChunkCoord c) const {
+    BlockStorage blocks{};
     const WorldPosition origin = chunkOrigin(c);
     for (int lx = 0; lx < kChunkSizeX; ++lx) {
         for (int lz = 0; lz < kChunkSizeZ; ++lz) {
@@ -66,16 +89,17 @@ void TerrainGenerator::generate(Chunk& out, ChunkCoord c) const {
                 } else if (y <= kSeaLevel && h < kSeaLevel) {
                     block = BlockId::Water;
                 }
-                out.setBlock({lx, y, lz}, block);
+                setBlock(blocks, {lx, y, lz}, block);
             }
         }
     }
-    carveCaves(out, c);
-    placeOres(out, c);
-    placeTrees(out, c);
+    carveCaves(blocks, c);
+    placeOres(blocks, c);
+    placeTrees(blocks, c);
+    out.replaceBlocks(blocks);
 }
 
-void TerrainGenerator::carveCaves(Chunk& out, ChunkCoord c) const {
+void TerrainGenerator::carveCaves(BlockStorage& blocks, ChunkCoord c) const {
     const WorldPosition origin = chunkOrigin(c);
     for (int lx = 0; lx < kChunkSizeX; ++lx) {
         for (int lz = 0; lz < kChunkSizeZ; ++lz) {
@@ -93,15 +117,15 @@ void TerrainGenerator::carveCaves(Chunk& out, ChunkCoord c) const {
                 bottom + 1 + static_cast<int>(noise::hash01(wx, wz, seed_ ^ kCaveWidthSalt) * 3.0f);
             for (int y = bottom; y <= top && y < h - 1 && y < kChunkHeight; ++y) {
                 const LocalCoord lc{lx, y, lz};
-                if (out.blockAt(lc) == BlockId::Stone) {
-                    out.setBlock(lc, BlockId::Air);
+                if (blockAt(blocks, lc) == BlockId::Stone) {
+                    setBlock(blocks, lc, BlockId::Air);
                 }
             }
         }
     }
 }
 
-void TerrainGenerator::placeOres(Chunk& out, ChunkCoord c) const {
+void TerrainGenerator::placeOres(BlockStorage& blocks, ChunkCoord c) const {
     const WorldPosition origin = chunkOrigin(c);
     for (int lx = 0; lx < kChunkSizeX; ++lx) {
         for (int lz = 0; lz < kChunkSizeZ; ++lz) {
@@ -121,24 +145,29 @@ void TerrainGenerator::placeOres(Chunk& out, ChunkCoord c) const {
             const BlockId ore = coal ? BlockId::CoalOre : BlockId::IronOre;
             for (int y = oy; y <= oy + 1 && y < h - 1 && y < kChunkHeight; ++y) {
                 const LocalCoord lc{lx, y, lz};
-                if (out.blockAt(lc) == BlockId::Stone) {
-                    out.setBlock(lc, ore);
+                if (blockAt(blocks, lc) == BlockId::Stone) {
+                    setBlock(blocks, lc, ore);
                 }
             }
         }
     }
 }
 
-void TerrainGenerator::placeTrees(Chunk& out, ChunkCoord c) const {
+void TerrainGenerator::placeTrees(BlockStorage& blocks, ChunkCoord c) const {
     const WorldPosition origin = chunkOrigin(c);
-    for (int lx = 0; lx < kChunkSizeX; ++lx) {
-        for (int lz = 0; lz < kChunkSizeZ; ++lz) {
-            const int wx = origin.x + lx;
-            const int wz = origin.z + lz;
+    // Evaluate tree origins in a one-block halo. Each chunk writes only its
+    // own cells, but sees neighboring origins whose canopies cross its edge,
+    // making output independent of chunk generation/load order.
+    for (int wx = origin.x - 1; wx <= origin.x + kChunkSizeX; ++wx) {
+        for (int wz = origin.z - 1; wz <= origin.z + kChunkSizeZ; ++wz) {
             const int h = surfaceHeight(wx, wz);
             // Trees on dry, moist land only, scattered by hash.
-            if (h <= kSeaLevel + 1 || moisture01(wx, wz) < 0.35f ||
-                noise::hash01(wx, wz, seed_ ^ kTreeSalt) >= 0.02f) {
+            const bool inSpawnClearing =
+                std::abs(wx) <= kSpawnTreeClearRadius &&
+                std::abs(wz) <= kSpawnTreeClearRadius;
+            if (inSpawnClearing || h <= kSeaLevel + 1 ||
+                moisture01(wx, wz) < 0.35f ||
+                noise::hash01(wx, wz, seed_ ^ kTreeSalt) >= kTreeDensity) {
                 continue;
             }
             const int trunkTop = h + 3;
@@ -148,7 +177,8 @@ void TerrainGenerator::placeTrees(Chunk& out, ChunkCoord c) const {
                            // kMaxSurfaceHeight headroom, kept as a guard)
             }
             for (int y = h; y <= trunkTop; ++y) {
-                out.setBlock({lx, y, lz}, BlockId::Wood);
+                setBlock(blocks, {wx - origin.x, y, wz - origin.z},
+                         BlockId::Wood);
             }
             // Canopy: full 3x3 ring at the top of the trunk, cross above.
             for (int dx = -1; dx <= 1; ++dx) {
@@ -156,13 +186,10 @@ void TerrainGenerator::placeTrees(Chunk& out, ChunkCoord c) const {
                     if (dx == 0 && dz == 0) {
                         continue;  // trunk occupies the center
                     }
-                    const int nx = lx + dx;
-                    const int nz = lz + dz;
-                    if (nx < 0 || nx >= kChunkSizeX || nz < 0 || nz >= kChunkSizeZ) {
-                        continue;  // canopy clipped at chunk border for now
-                    }
-                    if (out.blockAt({nx, trunkTop, nz}) == BlockId::Air) {
-                        out.setBlock({nx, trunkTop, nz}, BlockId::Leaves);
+                    const LocalCoord leaf{wx + dx - origin.x, trunkTop,
+                                          wz + dz - origin.z};
+                    if (blockAt(blocks, leaf) == BlockId::Air) {
+                        setBlock(blocks, leaf, BlockId::Leaves);
                     }
                 }
             }
@@ -171,13 +198,10 @@ void TerrainGenerator::placeTrees(Chunk& out, ChunkCoord c) const {
                     if (std::abs(dx) + std::abs(dz) > 1) {
                         continue;  // cross shape
                     }
-                    const int nx = lx + dx;
-                    const int nz = lz + dz;
-                    if (nx < 0 || nx >= kChunkSizeX || nz < 0 || nz >= kChunkSizeZ) {
-                        continue;
-                    }
-                    if (out.blockAt({nx, canopyTop, nz}) == BlockId::Air) {
-                        out.setBlock({nx, canopyTop, nz}, BlockId::Leaves);
+                    const LocalCoord leaf{wx + dx - origin.x, canopyTop,
+                                          wz + dz - origin.z};
+                    if (blockAt(blocks, leaf) == BlockId::Air) {
+                        setBlock(blocks, leaf, BlockId::Leaves);
                     }
                 }
             }
@@ -185,10 +209,35 @@ void TerrainGenerator::placeTrees(Chunk& out, ChunkCoord c) const {
     }
 }
 
+WorldGenerator::WorldGenerator(World& world)
+    : gen_(world.seed()), world_(world) {}
+
 WorldGenerator::WorldGenerator(std::uint32_t seed, World& world)
-    : gen_(seed), world_(world) {}
+    : gen_(seed), world_(world) {
+    if (seed != world.seed()) {
+        throw std::invalid_argument("WorldGenerator seed must match World seed");
+    }
+}
+
+void WorldGenerator::validateSeed() const {
+    if (gen_.seed() != world_.seed()) {
+        throw std::logic_error(
+            "World seed changed during WorldGenerator lifetime");
+    }
+}
+
+std::uint32_t WorldGenerator::seed() const {
+    validateSeed();
+    return gen_.seed();
+}
+
+int WorldGenerator::surfaceHeight(int x, int z) const {
+    validateSeed();
+    return gen_.surfaceHeight(x, z);
+}
 
 bool WorldGenerator::request(ChunkCoord c) {
+    validateSeed();
     if (world_.chunkAt(c) != nullptr) {
         return false;  // already generated
     }
@@ -201,12 +250,51 @@ bool WorldGenerator::request(ChunkCoord c) {
     return true;
 }
 
+bool WorldGenerator::cancel(ChunkCoord c) {
+    const std::uint64_t key = chunkKey(c);
+    if (queued_.erase(key) == 0) {
+        return false;
+    }
+    queue_.erase(std::remove_if(queue_.begin(), queue_.end(),
+                                [key](ChunkCoord queued) {
+                                    return chunkKey(queued) == key;
+                                }),
+                 queue_.end());
+    return true;
+}
+
+std::size_t WorldGenerator::cancelOutside(ChunkCoord center,
+                                          std::uint32_t radius) {
+    const auto firstCancelled =
+        std::remove_if(queue_.begin(), queue_.end(), [&](ChunkCoord c) {
+            if (axisDistance(c.cx, center.cx) <= radius &&
+                axisDistance(c.cz, center.cz) <= radius) {
+                return false;
+            }
+            queued_.erase(chunkKey(c));
+            return true;
+        });
+    const std::size_t cancelled =
+        static_cast<std::size_t>(queue_.end() - firstCancelled);
+    queue_.erase(firstCancelled, queue_.end());
+    return cancelled;
+}
+
 bool WorldGenerator::tick(std::size_t budget,
                           std::vector<ChunkCoord>* generated) {
+    validateSeed();
     std::size_t done = 0;
     while (!queue_.empty() && done < budget) {
-        const ChunkCoord c = queue_.front();
-        queue_.pop_front();
+        const auto next = std::min_element(
+            queue_.begin(), queue_.end(), [&](ChunkCoord a, ChunkCoord b) {
+                const std::uint64_t da = priorityDistance(a, priorityCenter_);
+                const std::uint64_t db = priorityDistance(b, priorityCenter_);
+                return da < db ||
+                       (da == db &&
+                        (a.cx < b.cx || (a.cx == b.cx && a.cz < b.cz)));
+            });
+        const ChunkCoord c = *next;
+        queue_.erase(next);
         queued_.erase(chunkKey(c));
         Chunk* chunk = world_.loadChunk(c);
         gen_.generate(*chunk, c);

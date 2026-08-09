@@ -3,6 +3,8 @@
 
 #include "test_harness.h"
 
+#include <stdexcept>
+
 #include "world/generator.h"
 
 using namespace voxel::world;
@@ -21,6 +23,20 @@ TEST(terrain_deterministic_same_seed) {
         }
     }
     CHECK_EQ(diffs, 0);
+}
+
+TEST(terrain_generation_publishes_one_chunk_version) {
+    const TerrainGenerator generator(2024u);
+    Chunk chunk({0, 0});
+
+    generator.generate(chunk, {0, 0});
+    CHECK_EQ(chunk.editVersion(), 1u);
+    CHECK(chunk.dirty());
+
+    chunk.clearDirty();
+    generator.generate(chunk, {0, 0});
+    CHECK_EQ(chunk.editVersion(), 1u);
+    CHECK(!chunk.dirty());
 }
 
 TEST(terrain_seed_changes_terrain) {
@@ -123,6 +139,24 @@ TEST(terrain_has_biome_variety) {
     CHECK(ore > 0);
 }
 
+TEST(terrain_keeps_spawn_clear_of_tree_trunks) {
+    const TerrainGenerator generator(2024u);
+    World world(2024u);
+    for (int cx = -1; cx <= 0; ++cx) {
+        for (int cz = -1; cz <= 0; ++cz) {
+            generator.generate(*world.loadChunk({cx, cz}), {cx, cz});
+        }
+    }
+
+    for (int x = -4; x <= 4; ++x) {
+        for (int z = -4; z <= 4; ++z) {
+            for (int y = 0; y < kChunkHeight; ++y) {
+                CHECK(world.blockAt({x, y, z}) != BlockId::Wood);
+            }
+        }
+    }
+}
+
 TEST(terrain_surface_height_in_range) {
     const TerrainGenerator g(77u);
     for (int x = -64; x <= 64; x += 7) {
@@ -162,6 +196,93 @@ TEST(world_generator_queue_and_budget) {
         }
     }
     CHECK(nonAir > 0);
+}
+
+TEST(world_generator_prioritizes_nearby_chunks_deterministically) {
+    World world(5u);
+    WorldGenerator gen(world);
+    gen.setPriorityCenter({10, -10});
+    CHECK(gen.request({0, 0}));
+    CHECK(gen.request({12, -10}));
+    CHECK(gen.request({10, -11}));
+    CHECK(gen.request({9, -10}));
+
+    std::vector<ChunkCoord> generated;
+    CHECK(gen.tick(2, &generated));
+    CHECK_EQ(generated.size(), 2u);
+    CHECK_EQ(generated[0].cx, 9);
+    CHECK_EQ(generated[0].cz, -10);
+    CHECK_EQ(generated[1].cx, 10);
+    CHECK_EQ(generated[1].cz, -11);
+}
+
+TEST(world_generator_cancels_obsolete_requests) {
+    World world(5u);
+    WorldGenerator gen(world);
+    CHECK(gen.request({0, 0}));
+    CHECK(gen.request({1, 1}));
+    CHECK(gen.request({2, 0}));
+    CHECK(gen.request({-3, 0}));
+    CHECK_EQ(gen.cancelOutside({0, 0}, 1), 2u);
+    CHECK_EQ(gen.pending(), 2u);
+    CHECK(!gen.cancel({2, 0}));
+    CHECK(gen.cancel({1, 1}));
+    CHECK_EQ(gen.pending(), 1u);
+
+    // Cancellation releases the deduplication key for a future request.
+    CHECK(gen.request({2, 0}));
+    CHECK_EQ(gen.pending(), 2u);
+}
+
+TEST(world_generator_rejects_seed_mismatch) {
+    World world(5u);
+    bool threw = false;
+    try {
+        WorldGenerator gen(6u, world);
+    } catch (const std::invalid_argument&) {
+        threw = true;
+    }
+    CHECK(threw);
+}
+
+TEST(world_generator_detects_world_reset) {
+    World world(5u);
+    WorldGenerator gen(world);
+    CHECK(gen.request({0, 0}));
+    world.reset(6u);
+
+    bool threw = false;
+    try {
+        gen.tick(1);
+    } catch (const std::logic_error&) {
+        threw = true;
+    }
+    CHECK(threw);
+    CHECK(world.chunkAt({0, 0}) == nullptr);
+}
+
+TEST(tree_canopies_continue_across_chunk_borders) {
+    const TerrainGenerator generator(2024u);
+    int continuedCanopies = 0;
+
+    for (int cx = -4; cx < 4; ++cx) {
+        for (int cz = -4; cz <= 4; ++cz) {
+            Chunk west({cx, cz});
+            Chunk east({cx + 1, cz});
+            generator.generate(west, {cx, cz});
+            generator.generate(east, {cx + 1, cz});
+            for (int z = 0; z < kChunkSizeZ; ++z) {
+                for (int y = 0; y < kChunkHeight; ++y) {
+                    if (west.blockAt({kChunkSizeX - 1, y, z}) == BlockId::Wood &&
+                        east.blockAt({0, y, z}) == BlockId::Leaves) {
+                        ++continuedCanopies;
+                    }
+                }
+            }
+        }
+    }
+
+    CHECK(continuedCanopies > 0);
 }
 
 TEST(world_generator_determinism) {

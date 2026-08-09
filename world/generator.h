@@ -2,7 +2,6 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <deque>
 #include <unordered_set>
 #include <vector>
 
@@ -34,10 +33,12 @@ public:
     static constexpr int kSeaLevel = 8;
 
 private:
+    using BlockStorage = Chunk::BlockStorage;
+
     float moisture01(int x, int z) const;
-    void carveCaves(Chunk& out, ChunkCoord c) const;
-    void placeOres(Chunk& out, ChunkCoord c) const;
-    void placeTrees(Chunk& out, ChunkCoord c) const;
+    void carveCaves(BlockStorage& blocks, ChunkCoord c) const;
+    void placeOres(BlockStorage& blocks, ChunkCoord c) const;
+    void placeTrees(BlockStorage& blocks, ChunkCoord c) const;
 
     std::uint32_t seed_;
     noise::GradientNoise2D continent_;
@@ -51,13 +52,22 @@ private:
 // renderer's frame submission.
 class WorldGenerator {
 public:
+    explicit WorldGenerator(World& world);
     WorldGenerator(std::uint32_t seed, World& world);
 
-    std::uint32_t seed() const { return gen_.seed(); }
+    std::uint32_t seed() const;
 
     // Queue a chunk for generation. Returns false if it is already loaded or
     // already queued.
     bool request(ChunkCoord c);
+
+    // Reprioritize pending work around the current streaming center. Nearest
+    // chunks are generated first; ties are stable by coordinate.
+    void setPriorityCenter(ChunkCoord center) { priorityCenter_ = center; }
+
+    // Cancel queued work that is no longer in the active interest set.
+    bool cancel(ChunkCoord c);
+    std::size_t cancelOutside(ChunkCoord center, std::uint32_t radius);
 
     std::size_t pending() const { return queue_.size(); }
 
@@ -68,13 +78,16 @@ public:
 
     // Height of the top solid surface at world (x, z); used to place the
     // camera and (later) the player. See TerrainGenerator::surfaceHeight.
-    int surfaceHeight(int x, int z) const { return gen_.surfaceHeight(x, z); }
+    int surfaceHeight(int x, int z) const;
 
 private:
+    void validateSeed() const;
+
     TerrainGenerator gen_;
     World& world_;
-    std::deque<ChunkCoord> queue_;
+    std::vector<ChunkCoord> queue_;
     std::unordered_set<std::uint64_t> queued_;
+    ChunkCoord priorityCenter_{0, 0};
 };
 
 }  // namespace voxel::world
