@@ -12,6 +12,8 @@ namespace voxel::world {
 // blocks. Default-constructed chunks are entirely Air.
 class Chunk {
 public:
+    using BlockStorage = std::array<BlockId, kBlocksPerChunk>;
+
     Chunk() = default;
     explicit Chunk(ChunkCoord coord) : coord_(coord) {}
 
@@ -22,13 +24,31 @@ public:
     BlockId blockAt(LocalCoord c) const {
         return inChunkBounds(c) ? blocks_[blockIndex(c)] : BlockId::Air;
     }
-    void setBlock(LocalCoord c, BlockId b) {
+    bool setBlock(LocalCoord c, BlockId b) {
         if (!inChunkBounds(c)) {
-            return;
+            return false;
         }
-        blocks_[blockIndex(c)] = b;
+        BlockId& current = blocks_[blockIndex(c)];
+        if (current == b) {
+            return false;
+        }
+        current = b;
         ++editVersion_;
         dirty_ = true;
+        return true;
+    }
+
+    // Atomically replace the complete chunk contents. Terrain generation uses
+    // this path so consumers observe one coherent version change rather than
+    // thousands of per-block edits. Returns false when content is unchanged.
+    bool replaceBlocks(const BlockStorage& blocks) {
+        if (blocks_ == blocks) {
+            return false;
+        }
+        blocks_ = blocks;
+        ++editVersion_;
+        dirty_ = true;
+        return true;
     }
 
     const BlockId* data() const { return blocks_.data(); }
@@ -42,7 +62,7 @@ public:
 
 private:
     ChunkCoord coord_{0, 0};
-    std::array<BlockId, kBlocksPerChunk> blocks_{};
+    BlockStorage blocks_{};
     std::uint32_t editVersion_ = 0;
     bool dirty_ = false;
 };

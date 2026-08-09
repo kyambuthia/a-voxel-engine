@@ -134,6 +134,33 @@ TEST(chunk_dirty_and_version) {
     CHECK_EQ(c.editVersion(), 1u);
     c.setBlock({0, 0, 0}, BlockId::Stone);
     CHECK_EQ(c.editVersion(), 2u);
+
+    c.clearDirty();
+    CHECK(!c.setBlock({0, 0, 0}, BlockId::Stone));
+    CHECK(!c.dirty());
+    CHECK_EQ(c.editVersion(), 2u);
+}
+
+TEST(chunk_bulk_replace_is_one_coherent_change) {
+    Chunk c({2, 3});
+    Chunk::BlockStorage blocks{};
+
+    CHECK(!c.replaceBlocks(blocks));
+    CHECK_EQ(c.editVersion(), 0u);
+    CHECK(!c.dirty());
+
+    blocks[blockIndex({3, 4, 5})] = BlockId::CoalOre;
+    blocks[blockIndex({4, 4, 5})] = BlockId::IronOre;
+    CHECK(c.replaceBlocks(blocks));
+    CHECK_EQ(c.editVersion(), 1u);
+    CHECK(c.dirty());
+    CHECK(c.blockAt({3, 4, 5}) == BlockId::CoalOre);
+    CHECK(c.blockAt({4, 4, 5}) == BlockId::IronOre);
+
+    c.clearDirty();
+    CHECK(!c.replaceBlocks(blocks));
+    CHECK_EQ(c.editVersion(), 1u);
+    CHECK(!c.dirty());
 }
 
 TEST(chunk_bounds_accessors) {
