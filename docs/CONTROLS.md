@@ -27,18 +27,17 @@ runs; pass a seed as the second argument to explore other terrain:
 
 ## Planned full control scheme (world + player milestone)
 
-Based on the Meese Engine spec's documented (unbound in the GCN build) scheme,
-mapped to PC and Android:
+Mapped to PC and Android:
 
-| Action | Meese (GameCube, original) | PC | Android |
-| --- | --- | --- | --- |
-| Move | Left stick | `W` `A` `S` `D` | Left half: virtual joystick |
-| Camera | C-stick | Mouse look (hold right or locked) | Right half: drag look |
-| Jump | `A` | `Space` | Jump button |
-| Break block | `L` | Left click | Break button |
-| Place block | — | Right click | Place button |
-| Show position | `Z` | `F3` | Toggle in pause |
-| Pause | `Start` | `Esc` / `P` | Pause button |
+| Action | PC | Android |
+| --- | --- | --- |
+| Move | `W` `A` `S` `D` | Left half: virtual joystick |
+| Camera | Mouse look (hold right or locked) | Right half: drag look |
+| Jump | `Space` | Jump button |
+| Break block | Left click | Break button |
+| Place block | Right click | Place button |
+| Show position | `F3` | Toggle in pause |
+| Pause | `Esc` / `P` | Pause button |
 
 These bindings will be implemented together with the first-person controller
 and the block-interaction raycast.
