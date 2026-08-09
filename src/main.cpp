@@ -17,12 +17,17 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
+#include <string>
 #include <unordered_set>
 #include <vector>
 
 #include "game/fly_camera.h"
+#include "game/fly_collision.h"
+#include "game/run_options.h"
 #include "mesh/builder.h"
 #include "render/renderer.h"
 #include "world/generator.h"
@@ -83,14 +88,29 @@ voxel::ChunkMeshData toMeshData(const voxel::mesh::ChunkMesh& mesh) {
 }  // namespace
 
 int main(int argc, char* argv[]) {
-    // Optional args: [maxFrames] [seed] (smoke-test / reproducible runs).
-    long maxFrames = 0;
-    if (argc >= 2) {
-        maxFrames = std::atol(argv[1]);
+    voxel::game::RunOptions options;
+    std::string optionsMessage;
+    const voxel::game::ParseOptionsResult optionsResult =
+        voxel::game::parseRunOptions(argc, argv, options, optionsMessage);
+    if (optionsResult != voxel::game::ParseOptionsResult::Run) {
+        std::FILE* stream = optionsResult == voxel::game::ParseOptionsResult::Help
+                                ? stdout
+                                : stderr;
+        std::fprintf(stream, "%s%s", optionsMessage.c_str(),
+                     optionsMessage.empty() || optionsMessage.back() == '\n' ? ""
+                                                                           : "\n");
+        return optionsResult == voxel::game::ParseOptionsResult::Help ? 0 : 2;
     }
-    std::uint32_t seed = 2024u;
-    if (argc >= 3) {
-        seed = static_cast<std::uint32_t>(std::strtoul(argv[2], nullptr, 0));
+    const long maxFrames = options.maxFrames;
+    const std::uint32_t seed = options.seed;
+    if (!options.screenshotDirectory.empty()) {
+        std::error_code error;
+        std::filesystem::create_directories(options.screenshotDirectory, error);
+        if (error) {
+            std::fprintf(stderr, "Could not create capture directory '%s': %s\n",
+                         options.screenshotDirectory.c_str(), error.message().c_str());
+            return 2;
+        }
     }
 
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS)) {
@@ -149,7 +169,7 @@ int main(int argc, char* argv[]) {
 
     // --- World + generation + meshing --------------------------------------
     voxel::world::World world(seed);
-    voxel::world::WorldGenerator generator(seed, world);
+    voxel::world::WorldGenerator generator(world);
     voxel::mesh::ChunkMesher mesher;
 
     std::unordered_set<std::uint64_t> meshed;
@@ -169,6 +189,19 @@ int main(int argc, char* argv[]) {
             meshed.insert(chunkKey(c));
         }
     };
+    constexpr voxel::world::Coord kNeighborOffsets[4][2] = {
+        {-1, 0}, {1, 0}, {0, -1}, {0, 1}};
+    const auto remeshLoadedNeighbors = [&](voxel::world::ChunkCoord center) {
+        for (const auto& offset : kNeighborOffsets) {
+            const voxel::world::ChunkCoord neighbor{
+                center.cx + offset[0], center.cz + offset[1]};
+            if (world.chunkAt(neighbor) == nullptr) {
+                continue;
+            }
+            uploadChunk(neighbor);
+            meshed.insert(chunkKey(neighbor));
+        }
+    };
 
     // Spawn the camera above the spawn terrain, looking back toward origin.
     const float spawnY =
@@ -185,6 +218,8 @@ int main(int argc, char* argv[]) {
 #endif
 
     bool running = true;
+    bool screenshotCaptured = false;
+    bool screenshotFailed = false;
     Uint64 prevTicks = SDL_GetTicks();
     long frameCount = 0;
 
@@ -352,50 +387,50 @@ int main(int argc, char* argv[]) {
             ((gKeys.space ? 1.0f : 0.0f) - (gKeys.c ? 1.0f : 0.0f)) *
             speed * dt;
 
-        const auto isBlocked = [&](glm::vec3 p) {
-            const int x = static_cast<int>(std::floor(p.x));
-            const int yFoot = static_cast<int>(std::floor(p.y - 0.25f));
-            const int yEye = static_cast<int>(std::floor(p.y));
-            const int z = static_cast<int>(std::floor(p.z));
-            if (world.blockAt({x, yFoot, z}) != voxel::world::BlockId::Air ||
-                world.blockAt({x, yEye, z}) != voxel::world::BlockId::Air) {
-                return true;
-            }
-            return false;
-        };
-        const auto moveAxis = [&](float dx, float dy, float dz) {
-            // Substep so fast flight cannot tunnel through thin geometry.
-            const glm::vec3 delta(dx, dy, dz);
-            const float extent =
-                std::max(std::abs(dx), std::max(std::abs(dy), std::abs(dz)));
-            const int steps =
-                std::max(1, static_cast<int>(std::ceil(extent / 0.5f)));
-            const glm::vec3 step = delta / static_cast<float>(steps);
-            for (int i = 0; i < steps; ++i) {
-                const glm::vec3 next = gCam.position + step;
-                if (isBlocked(next)) {
-                    return;
-                }
-                gCam.position = next;
-            }
-        };
-        moveAxis(horiz.x, 0.0f, 0.0f);
-        moveAxis(0.0f, 0.0f, horiz.z);
-        moveAxis(0.0f, vy, 0.0f);
+        voxel::game::moveFlyAxis(world, gCam.position, 0, horiz.x);
+        voxel::game::moveFlyAxis(world, gCam.position, 2, horiz.z);
+        voxel::game::moveFlyAxis(world, gCam.position, 1, vy);
 
         // --- Stream generation around the camera -----------------------------
-        constexpr int kChunkRadius = 6;
+        constexpr std::uint32_t kLoadRadius = 6;
+        constexpr std::uint32_t kUnloadRadius = 8;
         const voxel::world::ChunkCoord camChunk = voxel::world::chunkCoordOf(
             voxel::world::WorldPosition{
                 static_cast<voxel::world::Coord>(std::floor(gCam.position.x)),
                 0,
                 static_cast<voxel::world::Coord>(std::floor(gCam.position.z))});
-        for (int cx = -kChunkRadius; cx <= kChunkRadius; ++cx) {
-            for (int cz = -kChunkRadius; cz <= kChunkRadius; ++cz) {
+        generator.setPriorityCenter(camChunk);
+        generator.cancelOutside(camChunk, kLoadRadius);
+        for (int cx = -static_cast<int>(kLoadRadius);
+             cx <= static_cast<int>(kLoadRadius); ++cx) {
+            for (int cz = -static_cast<int>(kLoadRadius);
+                 cz <= static_cast<int>(kLoadRadius); ++cz) {
                 generator.request(
                     voxel::world::ChunkCoord{camChunk.cx + cx, camChunk.cz + cz});
             }
         }
+
+        // Retain a two-chunk hysteresis band so crossing a chunk boundary does
+        // not immediately destroy and recreate the same CPU/GPU resources.
+        std::vector<voxel::world::ChunkCoord> unload;
+        for (const voxel::world::ChunkCoord c : world.chunkCoords()) {
+            const std::int64_t dx =
+                std::abs(static_cast<std::int64_t>(c.cx) - camChunk.cx);
+            const std::int64_t dz =
+                std::abs(static_cast<std::int64_t>(c.cz) - camChunk.cz);
+            if (dx > kUnloadRadius || dz > kUnloadRadius) {
+                unload.push_back(c);
+            }
+        }
+        for (const voxel::world::ChunkCoord c : unload) {
+            world.unloadChunk(c);
+            renderer->clearChunkMesh(c);
+            meshed.erase(chunkKey(c));
+            // The surviving boundary chunks must expose faces that were
+            // previously hidden by the removed neighbor.
+            remeshLoadedNeighbors(c);
+        }
+
         std::vector<voxel::world::ChunkCoord> generated;
         generator.tick(4, &generated);
         for (const voxel::world::ChunkCoord c : generated) {
@@ -404,6 +439,9 @@ int main(int argc, char* argv[]) {
             }
             uploadChunk(c);
             meshed.insert(chunkKey(c));
+            // Older chunks may have emitted temporary faces against the then
+            // missing chunk. Rebuild them now that their neighbor exists.
+            remeshLoadedNeighbors(c);
         }
 
         if (renderer->beginFrame()) {
@@ -411,6 +449,31 @@ int main(int argc, char* argv[]) {
             camera.viewProj = buildViewProj();
             camera.eye = gCam.position;
             renderer->renderFrame(camera, deltaSeconds);
+            if (!options.screenshotPath.empty() &&
+                frameCount + 1 == options.screenshotFrame) {
+                if (!renderer->captureScreenshot(options.screenshotPath)) {
+                    screenshotFailed = true;
+                } else {
+                    screenshotCaptured = true;
+                }
+                // Capture scenarios are intentionally bounded and
+                // reproducible; do not keep simulating after their frame.
+                running = false;
+            }
+            if (!options.screenshotDirectory.empty() &&
+                (frameCount + 1) % options.screenshotInterval == 0) {
+                char filename[64];
+                std::snprintf(filename, sizeof(filename), "frame-%06ld.png",
+                              frameCount + 1);
+                const std::filesystem::path output =
+                    std::filesystem::path(options.screenshotDirectory) / filename;
+                if (!renderer->captureScreenshot(output.string())) {
+                    screenshotFailed = true;
+                    running = false;
+                } else {
+                    screenshotCaptured = true;
+                }
+            }
             renderer->endFrame();
         }
 
@@ -423,5 +486,8 @@ int main(int argc, char* argv[]) {
     renderer->shutdown();
     SDL_DestroyWindow(window);
     SDL_Quit();
-    return 0;
+    return screenshotFailed ||
+                   (!options.screenshotPath.empty() && !screenshotCaptured)
+               ? 1
+               : 0;
 }
