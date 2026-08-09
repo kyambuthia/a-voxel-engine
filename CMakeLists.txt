@@ -29,8 +29,15 @@ endif()
 # SDL/GL. Pure C++17 standard library, no renderer types.
 add_library(voxel_world STATIC
     world/world.cpp
+    world/noise.cpp
 )
 target_include_directories(voxel_world PUBLIC ${CMAKE_SOURCE_DIR})
+# Float-contract control: fuse-free math keeps noise results bit-identical
+# across the desktop (GCC) and Android (Clang) toolchains, which the
+# "same world seed -> same terrain hashes" acceptance gate depends on.
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(voxel_world PRIVATE -ffp-contract=off)
+endif()
 
 # --- Sources ---
 set(SOURCES
@@ -91,11 +98,13 @@ if(NOT ANDROID)
     add_executable(world_core_tests
         tests/test_main.cpp
         tests/world_core_test.cpp
+        tests/noise_test.cpp
     )
     target_include_directories(world_core_tests PRIVATE ${CMAKE_SOURCE_DIR})
     target_link_libraries(world_core_tests PRIVATE voxel_world)
     if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
         target_compile_options(world_core_tests PRIVATE -Wall -Wextra -Wpedantic)
+        target_compile_options(world_core_tests PRIVATE -ffp-contract=off)
     endif()
     if(CMAKE_BUILD_TYPE STREQUAL "Debug" AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
         target_compile_options(world_core_tests PRIVATE -fsanitize=address -fsanitize=undefined)

@@ -5,6 +5,7 @@
 // Kept header-only so new test files only need to #include it and link
 // tests/test_main.cpp.
 
+#include <cmath>
 #include <cstdio>
 #include <functional>
 #include <string>
@@ -51,6 +52,20 @@ void checkEq(const char* file, int line, const char* ea, const char* eb,
     reportFailure(file, line, buf);
 }
 
+template <typename A, typename B>
+void checkNear(const char* file, int line, const char* ea, const char* eb,
+               const A& a, const B& b, double tol) {
+    const double da = static_cast<double>(a);
+    const double db = static_cast<double>(b);
+    if (std::abs(da - db) <= tol) {
+        return;
+    }
+    char buf[512];
+    std::snprintf(buf, sizeof(buf), "CHECK_NEAR(%s, %s, tol) failed: %.9g != %.9g",
+                  ea, eb, da, db);
+    reportFailure(file, line, buf);
+}
+
 inline int runAll() {
     int failedCases = 0;
     const std::size_t total = registry().size();
@@ -85,3 +100,6 @@ inline int runAll() {
     } while (0)
 
 #define CHECK_EQ(a, b) ::test::checkEq(__FILE__, __LINE__, #a, #b, (a), (b))
+
+#define CHECK_NEAR(a, b, tol) \
+    ::test::checkNear(__FILE__, __LINE__, #a, #b, (a), (b), (tol))
