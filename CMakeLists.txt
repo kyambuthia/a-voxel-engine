@@ -53,6 +53,8 @@ endif()
 # --- Sources ---
 set(SOURCES
     src/main.cpp
+    game/fly_collision.cpp
+    game/run_options.cpp
     render/renderer.cpp
     render/opengl/gl_renderer.cpp
     render/opengl/gl_utils.cpp
@@ -116,6 +118,10 @@ if(NOT ANDROID)
         tests/generator_test.cpp
         tests/mesh_test.cpp
         tests/fly_camera_test.cpp
+        tests/fly_collision_test.cpp
+        tests/run_options_test.cpp
+        game/fly_collision.cpp
+        game/run_options.cpp
     )
     target_include_directories(world_core_tests PRIVATE ${CMAKE_SOURCE_DIR})
     target_link_libraries(world_core_tests PRIVATE voxel_world voxel_mesh)
